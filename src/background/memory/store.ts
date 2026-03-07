@@ -19,6 +19,8 @@ const DEFAULT_USER_CONTEXT: UserContext = {
     totalSessionCount: 0,
     lastSessionAt: 0,
   },
+  progressionThreshold: 0.6,
+  debugLearnerLevel: 0,
 };
 
 const VALID_CEFR_BANDS = new Set<UserContext["cefrBand"]>(["A1", "A2", "B1", "B2", "C1", "C2"]);
@@ -102,6 +104,14 @@ function sanitizeUserContext(input: unknown): Partial<UserContext> {
 
   if (typeof candidate.sessionDepth === "number") {
     sanitized.sessionDepth = candidate.sessionDepth;
+  }
+
+  if (typeof candidate.progressionThreshold === "number") {
+    sanitized.progressionThreshold = Math.max(0, Math.min(1, candidate.progressionThreshold));
+  }
+
+  if (typeof candidate.debugLearnerLevel === "number") {
+    sanitized.debugLearnerLevel = Math.max(0, Math.min(1, candidate.debugLearnerLevel));
   }
 
   return sanitized;

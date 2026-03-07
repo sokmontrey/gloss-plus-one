@@ -17,6 +17,10 @@ export interface UserContext {
   sessionFatigueSignal: boolean;
   sessionDepth: number;
   phraseState: LearnerPhraseState;
+  /** 0–1: confidence cutoff for when to start introducing the next phrase step. Higher = wait longer. */
+  progressionThreshold: number;
+  /** 0–1: debug override. 0 = nothing, 1 = everything (basics known, exploration mode). Persisted. */
+  debugLearnerLevel: number;
 }
 
 export interface PlannedReplacement {

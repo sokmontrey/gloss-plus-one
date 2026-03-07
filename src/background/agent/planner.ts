@@ -2,7 +2,11 @@ import { callBackboard } from "@/background/api/backboard";
 import { callGroq } from "@/background/api/groq";
 import { calculateBudget } from "@/background/agent/budget";
 import { buildReplacementPrompt } from "@/background/agent/prompt";
-import { getPhraseState } from "@/background/memory/phraseStore";
+import {
+  getEffectiveSeenPhrasesForLanguage,
+  getPhraseState,
+  seedFoundationalPhrases,
+} from "@/background/memory/phraseStore";
 import { getUserContext } from "@/background/memory/store";
 import type { SerializablePageContent } from "@/shared/messages";
 import type {
@@ -206,16 +210,26 @@ function groupByParagraph(
     }));
 }
 
+/** When debug learner level is high but not 100%, cap reinforcement per paragraph so discovery gets room. */
+const EXPLORATION_MODE_REINFORCEMENT_CAP = 1;
+
 function buildSeenPhraseReplacements(
   paragraphs: SerializablePageContent["paragraphs"],
   seenPhrases: PhraseMemory[],
+  options: { progressionThreshold: number; debugLearnerLevel: number },
 ): PlannedReplacement[] {
   const results: PlannedReplacement[] = [];
+  const level = options.debugLearnerLevel;
+  // At 100% ("everything") show all known/basic phrases; below that cap reinforcement to prioritize discovery.
+  const capPerParagraph =
+    level >= 0.8 && level < 1 ? EXPLORATION_MODE_REINFORCEMENT_CAP : Infinity;
 
   for (const paragraph of paragraphs) {
     const normalizedText = paragraph.text.toLowerCase();
+    let countInParagraph = 0;
 
     for (const seen of seenPhrases) {
+      if (countInParagraph >= capPerParagraph) break;
       const normalizedPhrase = seen.phrase.toLowerCase().trim();
       if (!normalizedText.includes(normalizedPhrase)) continue;
 
@@ -235,10 +249,33 @@ function buildSeenPhraseReplacements(
         confidence: seen.confidence,
         isReinforcement: true,
       });
+      countInParagraph += 1;
     }
   }
 
   return results;
+}
+
+/**
+ * Remaining budget for new discovery: only reinforcement phrases at or above progression threshold
+ * count as "filling" the budget. Lower-confidence reinforcement still shows but doesn't block new phrases.
+ */
+function remainingBudgetForDiscovery(
+  seenReplacements: PlannedReplacement[],
+  budget: ReplacementBudget,
+  progressionThreshold: number,
+): number {
+  const seenCountByParagraph = new Map<number, number>();
+  for (const replacement of seenReplacements) {
+    if (!replacement.isReinforcement || (replacement.confidence ?? 0) < progressionThreshold) continue;
+    seenCountByParagraph.set(
+      replacement.paragraphIndex,
+      (seenCountByParagraph.get(replacement.paragraphIndex) ?? 0) + 1,
+    );
+  }
+  return Object.entries(budget.perParagraph).reduce((sum, [paragraphIndex, limit]) => {
+    return sum + Math.max(0, limit - (seenCountByParagraph.get(Number(paragraphIndex)) ?? 0));
+  }, 0);
 }
 
 function filterNewReplacements(
@@ -324,24 +361,30 @@ export async function buildReplacementPlans(
     }
 
     const [userContext, phraseState] = await Promise.all([getUserContext(), getPhraseState()]);
-    const seenPhrases = phraseState.seenPhrases.filter(
-      (phrase) => phrase.targetLanguage === userContext.targetLanguage,
+    const progressionThreshold = Math.max(0, Math.min(1, userContext.progressionThreshold ?? 0.6));
+    const debugLevel = Math.max(0, Math.min(1, userContext.debugLearnerLevel ?? 0));
+
+    if (debugLevel >= 0.9) {
+      await seedFoundationalPhrases(userContext.targetLanguage);
+    }
+
+    const seenPhrases = await getEffectiveSeenPhrasesForLanguage(
+      userContext.targetLanguage,
+      debugLevel,
     );
     const extractedParagraphs = content.paragraphs as unknown as ExtractedParagraph[];
     const budget = calculateBudget(extractedParagraphs, userContext);
     console.log(`[GlossPlusOne:planner] Budget: ${budget.totalBudget} total replacements`);
 
-    const seenReplacements = buildSeenPhraseReplacements(content.paragraphs, seenPhrases);
-    const seenCountByParagraph = new Map<number, number>();
-    for (const replacement of seenReplacements) {
-      seenCountByParagraph.set(
-        replacement.paragraphIndex,
-        (seenCountByParagraph.get(replacement.paragraphIndex) ?? 0) + 1,
-      );
-    }
-    const remainingBudget = Object.entries(budget.perParagraph).reduce((sum, [paragraphIndex, limit]) => {
-      return sum + Math.max(0, limit - (seenCountByParagraph.get(Number(paragraphIndex)) ?? 0));
-    }, 0);
+    const seenReplacements = buildSeenPhraseReplacements(content.paragraphs, seenPhrases, {
+      progressionThreshold,
+      debugLearnerLevel: debugLevel,
+    });
+    const remainingBudget = remainingBudgetForDiscovery(
+      seenReplacements,
+      budget,
+      progressionThreshold,
+    );
     const discoveredReplacements =
       remainingBudget > 0 ? await discoverNewPhrases(content, userContext, seenPhrases, budget) : [];
     const newReplacements = filterNewReplacements(discoveredReplacements, seenReplacements, budget);
