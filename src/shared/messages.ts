@@ -1,4 +1,4 @@
-import type { PageContent } from "@/content/reader/types";
+import type { PageContent, ReplacementPlan } from "@/shared/types";
 
 export interface SerializableParagraph {
   index: number;
@@ -26,4 +26,11 @@ export interface RequestPlanMessage {
 }
 
 export type ContentToBackgroundMessage = PageLoadedMessage | RequestPlanMessage;
+
+export interface PlanReadyMessage {
+  type: "PLAN_READY";
+  payload: ReplacementPlan[];
+}
+
+export type BackgroundToContentMessage = PlanReadyMessage;
 
