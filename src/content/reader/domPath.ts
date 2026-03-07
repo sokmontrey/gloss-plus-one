@@ -1,5 +1,5 @@
 function cssEscape(value: string): string {
-  if ("CSS" in window && typeof window.CSS.escape === "function") {
+  if (typeof window.CSS !== "undefined" && typeof window.CSS.escape === "function") {
     return window.CSS.escape(value);
   }
   return value.replace(/([^\w-])/g, "\\$1");

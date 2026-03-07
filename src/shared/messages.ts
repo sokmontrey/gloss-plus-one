@@ -32,5 +32,23 @@ export interface PlanReadyMessage {
   payload: ReplacementPlan[];
 }
 
-export type BackgroundToContentMessage = PlanReadyMessage;
+/** Single replacement target: one phrase within a paragraph identified by domPath. */
+export interface ReplacementInstruction {
+  id: string;
+  domPath: string;
+  /** Paragraph text as extracted (used to match and compute offsets). */
+  sourceText: string;
+  /** Display text to show in place of the phrase. */
+  replacementText: string;
+  /** Start offset in sourceText (inclusive). */
+  start: number;
+  /** End offset in sourceText (exclusive). */
+  end: number;
+}
 
+export interface ApplyOutputMessage {
+  type: "APPLY_OUTPUT";
+  payload: ReplacementInstruction[];
+}
+
+export type BackgroundToContentMessage = PlanReadyMessage | ApplyOutputMessage;

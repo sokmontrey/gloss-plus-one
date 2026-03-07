@@ -9,7 +9,7 @@
     "isolatedModules": true,
     "noEmit": true,
     "skipLibCheck": true,
-    "types": ["chrome"],
+    "types": ["chrome", "vite/client"],
     "baseUrl": ".",
     "paths": {
       "@/*": ["./src/*"]

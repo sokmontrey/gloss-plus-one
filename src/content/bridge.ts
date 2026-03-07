@@ -1,5 +1,9 @@
 import type { PageContent } from "./reader/types";
-import type { ContentToBackgroundMessage, SerializablePageContent } from "@/shared/messages";
+import type {
+  ContentToBackgroundMessage,
+  SerializablePageContent,
+  ReplacementInstruction,
+} from "@/shared/messages";
 
 function toSerializablePageContent(content: PageContent): SerializablePageContent {
   return {
@@ -35,5 +39,16 @@ export function sendRequestPlan(trigger: "initial" | "mutation", content: PageCo
     trigger,
     payload: toSerializablePageContent(content),
   });
+}
+
+/** Register a handler for APPLY_OUTPUT messages from the background. */
+export function onApplyOutput(handler: (payload: ReplacementInstruction[]) => void) {
+  chrome.runtime.onMessage.addListener(
+    (message: { type?: string; payload?: ReplacementInstruction[] }) => {
+      if (message.type === "APPLY_OUTPUT" && message.payload) {
+        handler(message.payload);
+      }
+    }
+  );
 }
 
