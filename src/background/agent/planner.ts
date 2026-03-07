@@ -80,15 +80,34 @@ function parseManifest(
     throw new Error("MANIFEST_MISSING_ARTICLE_CONTEXT");
   }
 
-  if (!Array.isArray(parsed.replacements) || !parsed.replacements.every(isPlannedReplacement)) {
-    throw new Error("MANIFEST_MISSING_REPLACEMENTS");
+  const rawReplacements = parsed.replacements;
+  if (!Array.isArray(rawReplacements)) {
+    console.warn("[GlossPlusOne:planner] Manifest missing replacements array");
+    console.warn("[GlossPlusOne:planner] Parsed manifest keys:", Object.keys(parsed));
+
+    return {
+      articleContext: parsed.articleContext,
+      userContext,
+      budget,
+      replacements: [],
+      generatedAt: Date.now(),
+      modelUsed: MODEL_USED,
+    };
+  }
+
+  const replacements = rawReplacements.filter(isPlannedReplacement);
+  if (replacements.length !== rawReplacements.length) {
+    console.warn(
+      `[GlossPlusOne:planner] Manifest replacements invalid: kept ${replacements.length} of ${rawReplacements.length}`,
+    );
+    console.warn("[GlossPlusOne:planner] Raw replacements:", rawReplacements);
   }
 
   return {
     articleContext: parsed.articleContext,
     userContext,
     budget,
-    replacements: parsed.replacements,
+    replacements,
     generatedAt: Date.now(),
     modelUsed: MODEL_USED,
   };
@@ -98,25 +117,45 @@ function validateManifest(
   manifest: ReplacementManifest,
   paragraphs: SerializablePageContent["paragraphs"],
 ): { kept: PlannedReplacement[]; discarded: number } {
-  const paragraphByIndex = new Map(paragraphs.map((paragraph) => [paragraph.index, paragraph]));
-  const kept: PlannedReplacement[] = [];
-  let discarded = 0;
+  const validated = manifest.replacements.filter((replacement) => {
+    const paragraph = paragraphs.find((candidate) => candidate.index === replacement.paragraphIndex);
 
-  for (const replacement of manifest.replacements) {
-    const paragraph = paragraphByIndex.get(replacement.paragraphIndex);
-    const paragraphText = paragraph?.text ?? "";
-    const found = paragraphText.toLowerCase().includes(replacement.targetPhrase.toLowerCase());
-
-    if (!found) {
-      discarded += 1;
-      console.warn("[GlossPlusOne:planner] Discarded invalid replacement", replacement);
-      continue;
+    if (!paragraph) {
+      console.warn(
+        `[GlossPlusOne:planner] Discard — no paragraph at index ${replacement.paragraphIndex}`,
+        `| available indices: ${paragraphs.map((candidate) => candidate.index).join(", ")}`,
+      );
+      return false;
     }
 
-    kept.push(replacement);
+    const found = paragraph.text
+      .toLowerCase()
+      .includes(replacement.targetPhrase.toLowerCase().trim());
+
+    if (!found) {
+      console.warn(
+        `[GlossPlusOne:planner] Discard — phrase not found: "${replacement.targetPhrase}"`,
+        `\n  paragraph[${replacement.paragraphIndex}] first 100 chars: "${paragraph.text.slice(0, 100)}"`,
+      );
+    } else {
+      console.log(
+        `[GlossPlusOne:planner] Keep — "${replacement.targetPhrase}" → "${replacement.foreignPhrase}"`,
+      );
+    }
+
+    return found;
+  });
+
+  if (validated.length === 0) {
+    console.warn("[GlossPlusOne:planner] All replacements failed validation");
+    console.warn(
+      "[GlossPlusOne:planner] Paragraphs available:",
+      paragraphs.map((paragraph) => ({ index: paragraph.index, preview: paragraph.text.slice(0, 60) })),
+    );
+    return { kept: [], discarded: manifest.replacements.length };
   }
 
-  return { kept, discarded };
+  return { kept: validated, discarded: manifest.replacements.length - validated.length };
 }
 
 function groupByParagraph(
@@ -153,6 +192,11 @@ export async function buildReplacementPlans(
     console.log(
       `[GlossPlusOne:planner] REQUEST received - ${content.paragraphs.length} paragraphs, ${content.pageType}, ${content.domain}`,
     );
+
+    if (content.paragraphs.length === 0) {
+      console.warn("[GlossPlusOne:planner] No paragraphs available; skipping plan build");
+      return [];
+    }
 
     const userContext = await getUserContext();
     const extractedParagraphs = content.paragraphs as unknown as ExtractedParagraph[];
