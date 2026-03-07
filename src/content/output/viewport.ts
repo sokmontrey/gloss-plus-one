@@ -22,7 +22,7 @@ export function attachViewportAnimation(root: Document | Element = document): vo
         observer.unobserve(el);
       }
     },
-    { threshold: 0.1, rootMargin: "0px 0px -10% 0px" }
+    { threshold: 0.5 }
   );
   wrappers.forEach((el) => {
     if (observed.has(el)) return;

@@ -19,7 +19,8 @@
   },
   "permissions": ["storage"],
   "host_permissions": [
-    "https://app.backboard.io/*"
+    "https://app.backboard.io/*",
+    "https://api.groq.com/*"
   ],
   "content_scripts": [
     {

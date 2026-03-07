@@ -16,7 +16,7 @@ export function buildDomPath(element: Element): string {
   let cursor: Element | null = element;
   while (cursor && cursor !== document.documentElement) {
     const tag = cursor.tagName.toLowerCase();
-    const parent = cursor.parentElement;
+    const parent: Element | null = cursor.parentElement;
     if (!parent) break;
     const siblings = Array.from(parent.children);
     const index = siblings.indexOf(cursor) + 1;

@@ -1,4 +1,5 @@
 import { callBackboard } from "@/background/api/backboard";
+import { callGroq } from "@/background/api/groq";
 import { calculateBudget } from "@/background/agent/budget";
 import { buildReplacementPrompt } from "@/background/agent/prompt";
 import { getUserContext } from "@/background/memory/store";
@@ -13,7 +14,15 @@ import type {
   UserContext,
 } from "@/shared/types";
 
-const MODEL_USED = "backboard/gemini-2.0-flash";
+const MODEL_USED = "groq/llama-3.3-70b-versatile";
+
+function normalizeText(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/[\u2018\u2019\u201C\u201D]/g, "'")
+    .replace(/\s+/g, " ")
+    .trim();
+}
 
 function stripMarkdownFences(raw: string): string {
   const trimmed = raw.trim();
@@ -96,7 +105,7 @@ function parseManifest(
   }
 
   const replacements = rawReplacements.filter(isPlannedReplacement);
-  if (replacements.length !== rawReplacements.length) {
+  if (rawReplacements.length > 0 && replacements.length === 0) {
     console.warn(
       `[GlossPlusOne:planner] Manifest replacements invalid: kept ${replacements.length} of ${rawReplacements.length}`,
     );
@@ -128,9 +137,9 @@ function validateManifest(
       return false;
     }
 
-    const found = paragraph.text
-      .toLowerCase()
-      .includes(replacement.targetPhrase.toLowerCase().trim());
+    const normalizedParagraph = normalizeText(paragraph.text);
+    const normalizedPhrase = normalizeText(replacement.targetPhrase);
+    const found = normalizedParagraph.includes(normalizedPhrase);
 
     if (!found) {
       console.warn(
@@ -214,10 +223,11 @@ export async function buildReplacementPlans(
       budget,
     );
 
-    console.log("[GlossPlusOne:planner] Gemini call started");
+    void callBackboard;
+    console.log("[GlossPlusOne:planner] Groq call started");
     const startedAt = Date.now();
-    const rawResponse = await callBackboard(prompt);
-    console.log(`[GlossPlusOne:planner] Backboard responded — ${Date.now() - startedAt}ms`);
+    const rawResponse = await callGroq(prompt);
+    console.log(`[GlossPlusOne:planner] Groq responded — ${Date.now() - startedAt}ms`);
 
     const manifest = parseManifest(rawResponse, userContext, budget);
     const { kept, discarded } = validateManifest(manifest, content.paragraphs);

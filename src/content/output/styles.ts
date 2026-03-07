@@ -5,14 +5,21 @@ import { GLOSS_REVEALED_CLASS } from "./viewport";
 export const OUTPUT_STYLES = `
 .${GLOSS_WRAPPER_CLASS} {
   text-decoration: underline;
-  text-decoration-style: dotted;
-  text-underline-offset: 2px;
-  text-decoration-color: rgba(180, 160, 100, 0.6);
-  transition: text-decoration-color 0.2s ease, background-color 0.2s ease;
+  text-decoration-color: rgba(251, 191, 36, 0.6);
+  text-decoration-thickness: 2px;
+  text-underline-offset: 3px;
+  cursor: pointer;
+  transition: background-color 0.4s ease, text-decoration-color 0.3s ease;
+  border-radius: 2px;
+  padding: 0 1px;
 }
 .${GLOSS_WRAPPER_CLASS}.${GLOSS_REVEALED_CLASS} {
-  text-decoration-color: rgba(180, 160, 100, 0.85);
-  background-color: rgba(255, 248, 220, 0.35);
+  background-color: rgba(251, 191, 36, 0.15);
+  text-decoration-color: rgba(251, 191, 36, 0.9);
+}
+.${GLOSS_WRAPPER_CLASS}:hover {
+  background-color: rgba(251, 191, 36, 0.25);
+  text-decoration-color: rgba(251, 191, 36, 1);
 }
 `;
 
