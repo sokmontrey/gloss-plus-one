@@ -11,4 +11,11 @@ export default defineConfig({
       "@": new URL("./src", import.meta.url).pathname,
     },
   },
+  build: {
+    rollupOptions: {
+      input: {
+        "src/dashboard/index.html": "src/dashboard/index.html",
+      },
+    },
+  },
 });

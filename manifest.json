@@ -17,6 +17,9 @@
     "service_worker": "src/background/index.ts",
     "type": "module"
   },
+  "options_ui": {
+    "page": "src/dashboard/index.html"
+  },
   "permissions": ["storage"],
   "host_permissions": [
     "https://app.backboard.io/*",

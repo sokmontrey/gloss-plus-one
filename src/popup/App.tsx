@@ -2,7 +2,7 @@ import { ExternalLink } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 function openDashboard() {
-  chrome.tabs.create({ url: chrome.runtime.getURL("dashboard.html") });
+  chrome.runtime.openOptionsPage?.() ?? chrome.tabs.create({ url: chrome.runtime.getURL("src/dashboard/index.html") });
 }
 
 export default function App() {
