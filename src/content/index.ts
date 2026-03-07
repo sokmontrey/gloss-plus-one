@@ -17,6 +17,9 @@ injectOutputStyles(document);
 const metrics = createMetrics(import.meta.env.DEV);
 let lastExtractedParagraphs: SerializableParagraph[] = [];
 const processedParagraphPaths = new Set<string>();
+const processedParagraphKeys = new Set<string>();
+const queuedParagraphKeys = new Set<string>();
+let inFlightParagraphKeys = new Set<string>();
 let pendingParagraphs: SerializableParagraph[] = [];
 let planRequestPending = false;
 let latestPageMeta: Pick<PageContent, "url" | "title" | "domain" | "pageType" | "language"> | null = null;
@@ -111,6 +114,10 @@ function buildInstructionsFromPlans(
   });
 }
 
+function getParagraphKey(paragraph: SerializableParagraph): string {
+  return `${paragraph.domPath}::${normalizeText(paragraph.text)}`;
+}
+
 function serializeParagraph(paragraph: PageContent["paragraphs"][number]): SerializableParagraph {
   return {
     index: paragraph.index,
@@ -132,6 +139,12 @@ function rememberParagraphs(paragraphs: SerializableParagraph[]) {
 function queueParagraphs(paragraphs: SerializableParagraph[]) {
   const byPath = new Map(pendingParagraphs.map((paragraph) => [paragraph.domPath, paragraph]));
   for (const paragraph of paragraphs) {
+    const paragraphKey = getParagraphKey(paragraph);
+    if (processedParagraphKeys.has(paragraphKey) || inFlightParagraphKeys.has(paragraphKey)) {
+      continue;
+    }
+
+    queuedParagraphKeys.add(paragraphKey);
     byPath.set(paragraph.domPath, paragraph);
   }
   pendingParagraphs = [...byPath.values()].sort((left, right) => left.index - right.index);
@@ -168,7 +181,11 @@ function extractVisibleParagraphs(): SerializableParagraph[] {
   const visibleParagraphs = content.paragraphs
     .map(serializeParagraph)
     .filter((paragraph) => {
+      const paragraphKey = getParagraphKey(paragraph);
       if (processedParagraphPaths.has(paragraph.domPath)) return false;
+      if (processedParagraphKeys.has(paragraphKey)) return false;
+      if (queuedParagraphKeys.has(paragraphKey)) return false;
+      if (inFlightParagraphKeys.has(paragraphKey)) return false;
 
       const el = resolveDomPath(paragraph.domPath);
       if (!el) return false;
@@ -191,17 +208,30 @@ function requestPlanForParagraphs(paragraphs: SerializableParagraph[], trigger: 
     return;
   }
 
+  const nextParagraphs = paragraphs.filter((paragraph) => {
+    const paragraphKey = getParagraphKey(paragraph);
+    if (processedParagraphKeys.has(paragraphKey)) return false;
+    if (inFlightParagraphKeys.has(paragraphKey)) return false;
+    queuedParagraphKeys.delete(paragraphKey);
+    return true;
+  });
+
+  if (nextParagraphs.length === 0) {
+    return;
+  }
+
   planRequestPending = true;
-  rememberParagraphs(paragraphs);
+  inFlightParagraphKeys = new Set(nextParagraphs.map((paragraph) => getParagraphKey(paragraph)));
+  rememberParagraphs(nextParagraphs);
 
   const pageMeta = getPageMeta();
   const content: PageContent = {
     ...pageMeta,
-    paragraphs: paragraphs.map((paragraph) => ({
+    paragraphs: nextParagraphs.map((paragraph) => ({
       ...paragraph,
       nodeRef: null,
     })),
-    totalWordCount: paragraphs.reduce((sum, paragraph) => sum + paragraph.wordCount, 0),
+    totalWordCount: nextParagraphs.reduce((sum, paragraph) => sum + paragraph.wordCount, 0),
     extractedAt: Date.now(),
   };
 
@@ -288,6 +318,12 @@ chrome.runtime.onMessage.addListener((message: BackgroundToContentMessage) => {
   console.log(
     `[GlossPlusOne:content] Built ${instructions.length} instructions from plans`,
   );
+
+  for (const paragraphKey of inFlightParagraphKeys) {
+    processedParagraphKeys.add(paragraphKey);
+  }
+  inFlightParagraphKeys = new Set();
+
   planRequestPending = false;
   if (instructions.length > 0) {
     console.log("[GlossPlusOne:content] Applying instructions to DOM");
