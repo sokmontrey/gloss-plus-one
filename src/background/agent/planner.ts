@@ -2,11 +2,13 @@ import { callBackboard } from "@/background/api/backboard";
 import { callGroq } from "@/background/api/groq";
 import { calculateBudget } from "@/background/agent/budget";
 import { buildReplacementPrompt } from "@/background/agent/prompt";
+import { getPhraseState } from "@/background/memory/phraseStore";
 import { getUserContext } from "@/background/memory/store";
 import type { SerializablePageContent } from "@/shared/messages";
 import type {
   ArticleContext,
   ExtractedParagraph,
+  PhraseMemory,
   PlannedReplacement,
   ReplacementBudget,
   ReplacementManifest,
@@ -67,8 +69,14 @@ function isPlannedReplacement(value: unknown): value is PlannedReplacement {
     ["vocabulary", "phrase", "grammar_structure"].includes(value.replacementType) &&
     typeof value.pedagogicalReason === "string" &&
     typeof value.paragraphIndex === "number" &&
-    typeof value.caseSensitive === "boolean"
+    typeof value.caseSensitive === "boolean" &&
+    (typeof value.confidence === "undefined" || typeof value.confidence === "number") &&
+    (typeof value.isReinforcement === "undefined" || typeof value.isReinforcement === "boolean")
   );
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function parseManifest(
@@ -126,6 +134,10 @@ function validateManifest(
   manifest: ReplacementManifest,
   paragraphs: SerializablePageContent["paragraphs"],
 ): { kept: PlannedReplacement[]; discarded: number } {
+  if (manifest.replacements.length === 0) {
+    return { kept: [], discarded: 0 };
+  }
+
   const validated = manifest.replacements.filter((replacement) => {
     const paragraph = paragraphs.find((candidate) => candidate.index === replacement.paragraphIndex);
 
@@ -194,6 +206,110 @@ function groupByParagraph(
     }));
 }
 
+function buildSeenPhraseReplacements(
+  paragraphs: SerializablePageContent["paragraphs"],
+  seenPhrases: PhraseMemory[],
+): PlannedReplacement[] {
+  const results: PlannedReplacement[] = [];
+
+  for (const paragraph of paragraphs) {
+    const normalizedText = paragraph.text.toLowerCase();
+
+    for (const seen of seenPhrases) {
+      const normalizedPhrase = seen.phrase.toLowerCase().trim();
+      if (!normalizedText.includes(normalizedPhrase)) continue;
+
+      const regex = new RegExp(`\\b${escapeRegExp(normalizedPhrase)}\\b`, "i");
+      if (!regex.test(paragraph.text)) continue;
+
+      results.push({
+        targetPhrase: seen.phrase,
+        foreignPhrase: seen.targetPhrase,
+        translation: seen.phrase,
+        targetLanguage: seen.targetLanguage,
+        difficultyLevel: 1,
+        replacementType: seen.phraseType === "structural" ? "grammar_structure" : "vocabulary",
+        pedagogicalReason: `reinforcement - confidence ${(seen.confidence * 100).toFixed(0)}%`,
+        paragraphIndex: paragraph.index,
+        caseSensitive: false,
+        confidence: seen.confidence,
+        isReinforcement: true,
+      });
+    }
+  }
+
+  return results;
+}
+
+function filterNewReplacements(
+  replacements: PlannedReplacement[],
+  seenReplacements: PlannedReplacement[],
+  budget: ReplacementBudget,
+): PlannedReplacement[] {
+  const seenPhraseKeys = new Set(
+    seenReplacements.map(
+      (replacement) => `${replacement.paragraphIndex}:${replacement.targetPhrase.toLowerCase().trim()}`,
+    ),
+  );
+  const seenCounts = new Map<number, number>();
+  for (const replacement of seenReplacements) {
+    seenCounts.set(replacement.paragraphIndex, (seenCounts.get(replacement.paragraphIndex) ?? 0) + 1);
+  }
+
+  const perParagraphAdded = new Map<number, number>();
+  const kept: PlannedReplacement[] = [];
+
+  for (const replacement of replacements) {
+    const phraseKey = `${replacement.paragraphIndex}:${replacement.targetPhrase.toLowerCase().trim()}`;
+    if (seenPhraseKeys.has(phraseKey)) {
+      continue;
+    }
+
+    const seenCount = seenCounts.get(replacement.paragraphIndex) ?? 0;
+    const alreadyAdded = perParagraphAdded.get(replacement.paragraphIndex) ?? 0;
+    const paragraphBudget = budget.perParagraph[replacement.paragraphIndex] ?? 0;
+    const remaining = Math.max(0, paragraphBudget - seenCount);
+    if (alreadyAdded >= remaining) {
+      continue;
+    }
+
+    perParagraphAdded.set(replacement.paragraphIndex, alreadyAdded + 1);
+    kept.push({ ...replacement, isReinforcement: false });
+  }
+
+  return kept;
+}
+
+async function discoverNewPhrases(
+  content: SerializablePageContent,
+  userContext: UserContext,
+  seenPhrases: PhraseMemory[],
+  budget: ReplacementBudget,
+): Promise<PlannedReplacement[]> {
+  const prompt = buildReplacementPrompt(
+    content.paragraphs,
+    userContext,
+    {
+      title: content.title,
+      domain: content.domain,
+      pageType: content.pageType,
+    },
+    budget,
+    seenPhrases,
+  );
+
+  void callBackboard;
+  console.log("[GlossPlusOne:planner] Groq call started");
+  const startedAt = Date.now();
+  const rawResponse = await callGroq(prompt);
+  console.log(`[GlossPlusOne:planner] Groq responded — ${Date.now() - startedAt}ms`);
+
+  const manifest = parseManifest(rawResponse, userContext, budget);
+  const { kept, discarded } = validateManifest(manifest, content.paragraphs);
+  console.log(`[GlossPlusOne:planner] Validated: ${kept.length} kept, ${discarded} discarded`);
+  return kept;
+}
+
 export async function buildReplacementPlans(
   content: SerializablePageContent,
 ): Promise<ReplacementPlan[]> {
@@ -207,33 +323,29 @@ export async function buildReplacementPlans(
       return [];
     }
 
-    const userContext = await getUserContext();
+    const [userContext, phraseState] = await Promise.all([getUserContext(), getPhraseState()]);
+    const seenPhrases = phraseState.seenPhrases.filter(
+      (phrase) => phrase.targetLanguage === userContext.targetLanguage,
+    );
     const extractedParagraphs = content.paragraphs as unknown as ExtractedParagraph[];
     const budget = calculateBudget(extractedParagraphs, userContext);
     console.log(`[GlossPlusOne:planner] Budget: ${budget.totalBudget} total replacements`);
 
-    const prompt = buildReplacementPrompt(
-      extractedParagraphs,
-      userContext,
-      {
-        title: content.title,
-        domain: content.domain,
-        pageType: content.pageType,
-      },
-      budget,
-    );
-
-    void callBackboard;
-    console.log("[GlossPlusOne:planner] Groq call started");
-    const startedAt = Date.now();
-    const rawResponse = await callGroq(prompt);
-    console.log(`[GlossPlusOne:planner] Groq responded — ${Date.now() - startedAt}ms`);
-
-    const manifest = parseManifest(rawResponse, userContext, budget);
-    const { kept, discarded } = validateManifest(manifest, content.paragraphs);
-    console.log(`[GlossPlusOne:planner] Validated: ${kept.length} kept, ${discarded} discarded`);
-
-    const plans = groupByParagraph(kept, content.paragraphs);
+    const seenReplacements = buildSeenPhraseReplacements(content.paragraphs, seenPhrases);
+    const seenCountByParagraph = new Map<number, number>();
+    for (const replacement of seenReplacements) {
+      seenCountByParagraph.set(
+        replacement.paragraphIndex,
+        (seenCountByParagraph.get(replacement.paragraphIndex) ?? 0) + 1,
+      );
+    }
+    const remainingBudget = Object.entries(budget.perParagraph).reduce((sum, [paragraphIndex, limit]) => {
+      return sum + Math.max(0, limit - (seenCountByParagraph.get(Number(paragraphIndex)) ?? 0));
+    }, 0);
+    const discoveredReplacements =
+      remainingBudget > 0 ? await discoverNewPhrases(content, userContext, seenPhrases, budget) : [];
+    const newReplacements = filterNewReplacements(discoveredReplacements, seenReplacements, budget);
+    const plans = groupByParagraph([...seenReplacements, ...newReplacements], content.paragraphs);
     console.log(`[GlossPlusOne:planner] PLAN_READY - ${plans.length} ReplacementPlans`);
 
     return plans;

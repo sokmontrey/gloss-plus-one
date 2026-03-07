@@ -150,10 +150,14 @@ export function applyReplacement(instruction: ReplacementInstruction): boolean {
   range.setEnd(endNode, endOffset);
 
   const span = document.createElement("span");
+  const confidence = instruction.confidence ?? 0;
   span.setAttribute(GLOSS_MARKER_ATTR, instruction.id);
   span.setAttribute(GLOSS_SOURCE_ATTR, instruction.sourceText.slice(instruction.start, instruction.end));
+  span.setAttribute("data-gloss-confidence", String(confidence));
+  span.setAttribute("data-gloss-reinforcement", instruction.isReinforcement ? "true" : "false");
   span.className = GLOSS_WRAPPER_CLASS;
   span.textContent = instruction.replacementText;
+  span.style.setProperty("--gloss-confidence", String(confidence));
 
   try {
     range.deleteContents();

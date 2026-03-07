@@ -25,7 +25,21 @@ export interface RequestPlanMessage {
   payload: SerializablePageContent;
 }
 
-export type ContentToBackgroundMessage = PageLoadedMessage | RequestPlanMessage;
+export interface WordSignalMessage {
+  type: "WORD_SIGNAL";
+  payload: {
+    phrase: string;
+    foreignPhrase: string;
+    targetLanguage: string;
+    phraseType: "structural" | "lexical";
+    signal: "exposure" | "reveal" | "pass";
+    dwellMs: number;
+    url: string;
+    title: string;
+  };
+}
+
+export type ContentToBackgroundMessage = PageLoadedMessage | RequestPlanMessage | WordSignalMessage;
 
 export interface PlanReadyMessage {
   type: "PLAN_READY";
@@ -44,6 +58,8 @@ export interface ReplacementInstruction {
   start: number;
   /** End offset in sourceText (exclusive). */
   end: number;
+  confidence?: number;
+  isReinforcement?: boolean;
 }
 
 export interface ApplyOutputMessage {

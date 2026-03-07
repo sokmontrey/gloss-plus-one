@@ -8,7 +8,12 @@ import type {
   ReplacementInstruction,
   SerializableParagraph,
 } from "@/shared/messages";
-import { injectOutputStyles, applyOutputAndAnimate } from "./output";
+import {
+  GLOSS_MARKER_ATTR,
+  GLOSS_WRAPPER_CLASS,
+  applyOutputAndAnimate,
+  injectOutputStyles,
+} from "./output";
 import type { PageContent } from "./reader/types";
 import type { ReplacementPlan } from "@/shared/types";
 
@@ -26,6 +31,17 @@ let latestPageMeta: Pick<PageContent, "url" | "title" | "domain" | "pageType" | 
 let scrollTimer: ReturnType<typeof window.setTimeout> | null = null;
 let mutationTimer: ReturnType<typeof window.setTimeout> | null = null;
 let lastScrollY = window.scrollY;
+const replacementSignalsById = new Map<
+  string,
+  {
+    phrase: string;
+    foreignPhrase: string;
+    targetLanguage: string;
+    phraseType: "structural" | "lexical";
+    confidence: number;
+    isReinforcement: boolean;
+  }
+>();
 
 function normalizeText(text: string): string {
   return text.replace(/\s+/g, " ").trim();
@@ -99,15 +115,26 @@ function buildInstructionsFromPlans(
       }
 
       usedRanges.push(range);
+      const id = crypto.randomUUID();
+      replacementSignalsById.set(id, {
+        phrase: replacement.targetPhrase,
+        foreignPhrase: replacement.foreignPhrase,
+        targetLanguage: replacement.targetLanguage,
+        phraseType: replacement.replacementType === "grammar_structure" ? "structural" : "lexical",
+        confidence: replacement.confidence ?? 0,
+        isReinforcement: replacement.isReinforcement ?? false,
+      });
 
       return [
         {
-          id: crypto.randomUUID(),
+          id,
           domPath: paragraph.domPath,
           sourceText,
           replacementText: replacement.foreignPhrase,
           start: range.start,
           end: range.end,
+          confidence: replacement.confidence,
+          isReinforcement: replacement.isReinforcement,
         },
       ];
     });
@@ -243,6 +270,47 @@ onApplyOutput((payload) => {
   applyOutputAndAnimate(payload);
 });
 
+document.addEventListener("click", (event) => {
+  const target = event.target;
+  if (!(target instanceof Element)) {
+    return;
+  }
+
+  const wrapper = target.closest(`.${GLOSS_WRAPPER_CLASS}`);
+  if (!(wrapper instanceof HTMLElement)) {
+    return;
+  }
+
+  const replacementId = wrapper.getAttribute(GLOSS_MARKER_ATTR);
+  if (!replacementId) {
+    return;
+  }
+
+  const signal = replacementSignalsById.get(replacementId);
+  if (!signal) {
+    return;
+  }
+
+  const nextConfidence = Math.max(signal.confidence - 0.12, 0);
+  signal.confidence = nextConfidence;
+  wrapper.style.setProperty("--gloss-confidence", String(nextConfidence));
+  wrapper.setAttribute("data-gloss-confidence", String(nextConfidence));
+
+  void chrome.runtime.sendMessage({
+    type: "WORD_SIGNAL",
+    payload: {
+      phrase: signal.phrase,
+      foreignPhrase: signal.foreignPhrase,
+      targetLanguage: signal.targetLanguage,
+      phraseType: signal.phraseType,
+      signal: "reveal",
+      dwellMs: 0,
+      url: window.location.href,
+      title: document.title,
+    },
+  });
+});
+
 sendPageLoaded();
 window.setTimeout(() => {
   const initialParagraphs = extractVisibleParagraphs();
@@ -329,6 +397,23 @@ chrome.runtime.onMessage.addListener((message: BackgroundToContentMessage) => {
     console.log("[GlossPlusOne:content] Applying instructions to DOM");
     observer.disconnect();
     applyOutputAndAnimate(instructions);
+    for (const plan of freshPlans) {
+      for (const replacement of plan.replacements) {
+        void chrome.runtime.sendMessage({
+          type: "WORD_SIGNAL",
+          payload: {
+            phrase: replacement.targetPhrase,
+            foreignPhrase: replacement.foreignPhrase,
+            targetLanguage: replacement.targetLanguage,
+            phraseType: replacement.replacementType === "grammar_structure" ? "structural" : "lexical",
+            signal: "exposure",
+            dwellMs: 0,
+            url: window.location.href,
+            title: document.title,
+          },
+        });
+      }
+    }
     requestAnimationFrame(() => {
       if (document.body) {
         observer.observe(document.body, { childList: true, subtree: true });

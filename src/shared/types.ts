@@ -16,6 +16,7 @@ export interface UserContext {
   immersionIntensity: number;
   sessionFatigueSignal: boolean;
   sessionDepth: number;
+  phraseState: LearnerPhraseState;
 }
 
 export interface PlannedReplacement {
@@ -28,6 +29,36 @@ export interface PlannedReplacement {
   pedagogicalReason: string;
   paragraphIndex: number;
   caseSensitive: boolean;
+  confidence?: number;
+  isReinforcement?: boolean;
+}
+
+export interface PhraseMemory {
+  phrase: string;
+  targetPhrase: string;
+  targetLanguage: string;
+  phraseType: "structural" | "lexical";
+  confidence: number;
+  exposures: number;
+  reveals: number;
+  passedCount: number;
+  firstSeenAt: number;
+  lastSeenAt: number;
+  firstSeenUrl: string;
+  firstSeenTitle: string;
+}
+
+export interface LearnerPhraseState {
+  seenPhrases: PhraseMemory[];
+  pendingIntroductions: {
+    phrase: string;
+    targetPhrase: string;
+    targetLanguage: string;
+    phraseType: "structural" | "lexical";
+    introducedAt: number;
+  }[];
+  totalSessionCount: number;
+  lastSessionAt: number;
 }
 
 export interface ReplacementBudget {
