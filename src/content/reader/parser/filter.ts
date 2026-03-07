@@ -34,7 +34,7 @@ export function isReadableParagraph(rawText: string, options: ParagraphFilterOpt
   const text = rawText.replace(/\s+/g, " ").trim();
   if (!text) return false;
   if (URL_RE.test(text)) return false;
-  if (wordCount(text) < (options.minWords ?? 20)) return false;
+  if (wordCount(text) < (options.minWords ?? 10)) return false;
   if (heavyRatio(text) > 0.5) return false;
   if (isAllCaps(text)) return false;
   if (CODE_RE.test(text)) return false;
