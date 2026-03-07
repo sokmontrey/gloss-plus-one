@@ -210,26 +210,16 @@ function groupByParagraph(
     }));
 }
 
-/** When debug learner level is high but not 100%, cap reinforcement per paragraph so discovery gets room. */
-const EXPLORATION_MODE_REINFORCEMENT_CAP = 1;
-
 function buildSeenPhraseReplacements(
   paragraphs: SerializablePageContent["paragraphs"],
   seenPhrases: PhraseMemory[],
-  options: { progressionThreshold: number; debugLearnerLevel: number },
 ): PlannedReplacement[] {
   const results: PlannedReplacement[] = [];
-  const level = options.debugLearnerLevel;
-  // At 100% ("everything") show all known/basic phrases; below that cap reinforcement to prioritize discovery.
-  const capPerParagraph =
-    level >= 0.8 && level < 1 ? EXPLORATION_MODE_REINFORCEMENT_CAP : Infinity;
 
   for (const paragraph of paragraphs) {
     const normalizedText = paragraph.text.toLowerCase();
-    let countInParagraph = 0;
 
     for (const seen of seenPhrases) {
-      if (countInParagraph >= capPerParagraph) break;
       const normalizedPhrase = seen.phrase.toLowerCase().trim();
       if (!normalizedText.includes(normalizedPhrase)) continue;
 
@@ -249,7 +239,6 @@ function buildSeenPhraseReplacements(
         confidence: seen.confidence,
         isReinforcement: true,
       });
-      countInParagraph += 1;
     }
   }
 
@@ -376,10 +365,7 @@ export async function buildReplacementPlans(
     const budget = calculateBudget(extractedParagraphs, userContext);
     console.log(`[GlossPlusOne:planner] Budget: ${budget.totalBudget} total replacements`);
 
-    const seenReplacements = buildSeenPhraseReplacements(content.paragraphs, seenPhrases, {
-      progressionThreshold,
-      debugLearnerLevel: debugLevel,
-    });
+    const seenReplacements = buildSeenPhraseReplacements(content.paragraphs, seenPhrases);
     const remainingBudget = remainingBudgetForDiscovery(
       seenReplacements,
       budget,

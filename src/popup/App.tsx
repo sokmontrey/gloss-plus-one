@@ -50,6 +50,7 @@ export default function App() {
   const [progressionThreshold, setProgressionThreshold] = useState(DEFAULT_PROGRESSION);
   const [debugLearnerLevel, setDebugLearnerLevel] = useState(DEFAULT_DEBUG_LEVEL);
   const [saved, setSaved] = useState(false);
+  const [resetDone, setResetDone] = useState(false);
 
   useEffect(() => {
     loadStoredContext()
@@ -72,6 +73,16 @@ export default function App() {
         setTimeout(() => setSaved(false), 1500);
       })
       .catch((err) => console.warn("[GlossPlusOne:popup] Save failed", err));
+  };
+
+  const handleResetPhrases = () => {
+    chrome.runtime
+      .sendMessage({ type: "RESET_PHRASES" })
+      .then(() => {
+        setResetDone(true);
+        setTimeout(() => setResetDone(false), 2000);
+      })
+      .catch((err) => console.warn("[GlossPlusOne:popup] Reset failed", err));
   };
 
   return (
@@ -127,13 +138,27 @@ export default function App() {
         </p>
       </section>
 
-      <div className="mt-4 flex items-center gap-2">
-        <Button onClick={handleSave} className="mt-1">
-          {saved ? "Saved" : "Save"}
-        </Button>
-        {saved && (
-          <span className="text-xs text-slate-500">Settings stored.</span>
-        )}
+      <div className="mt-4 flex flex-col gap-3">
+        <div className="flex items-center gap-2">
+          <Button onClick={handleSave} className="mt-1">
+            {saved ? "Saved" : "Save"}
+          </Button>
+          {saved && (
+            <span className="text-xs text-slate-500">Settings stored.</span>
+          )}
+        </div>
+        <div className="border-t border-slate-200 pt-3">
+          <Button
+            variant="outline"
+            onClick={handleResetPhrases}
+            className="w-full text-amber-700 hover:bg-amber-50"
+          >
+            {resetDone ? "Reset complete" : "Reset learned phrases"}
+          </Button>
+          <p className="mt-1 text-xs text-slate-500">
+            Clear all learned phrases and start fresh. Reload the page to see changes.
+          </p>
+        </div>
       </div>
     </main>
   );

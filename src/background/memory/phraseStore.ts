@@ -18,6 +18,12 @@ export async function savePhraseState(state: LearnerPhraseState): Promise<void> 
   await chrome.storage.local.set({ [STORAGE_KEY]: state });
 }
 
+/** Clears all learned phrases and resets phrase state to default. */
+export async function resetPhraseState(): Promise<void> {
+  await savePhraseState({ ...DEFAULT_PHRASE_STATE });
+  console.log("[GlossPlusOne:phraseStore] Phrase state reset");
+}
+
 export async function recordPhraseExposure(
   phrase: string,
   targetPhrase: string,

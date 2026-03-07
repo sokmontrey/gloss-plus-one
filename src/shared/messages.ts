@@ -39,7 +39,15 @@ export interface WordSignalMessage {
   };
 }
 
-export type ContentToBackgroundMessage = PageLoadedMessage | RequestPlanMessage | WordSignalMessage;
+export interface ResetPhrasesMessage {
+  type: "RESET_PHRASES";
+}
+
+export type ContentToBackgroundMessage =
+  | PageLoadedMessage
+  | RequestPlanMessage
+  | WordSignalMessage
+  | ResetPhrasesMessage;
 
 export interface PlanReadyMessage {
   type: "PLAN_READY";

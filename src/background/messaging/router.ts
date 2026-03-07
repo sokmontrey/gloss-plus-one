@@ -4,6 +4,7 @@ import {
   recordPhraseExposure,
   recordPhrasePassed,
   recordPhraseReveal,
+  resetPhraseState,
   touchPhraseSession,
 } from "@/background/memory/phraseStore";
 import { getUserContext, syncNarrativeToBackboard } from "@/background/memory/store";
@@ -42,6 +43,12 @@ export async function routeBackgroundMessage(
         const [phraseState, userContext] = await Promise.all([getPhraseState(), getUserContext()]);
         void syncNarrativeToBackboard(phraseState, userContext);
       }
+      break;
+    }
+
+    case "RESET_PHRASES": {
+      await resetPhraseState();
+      console.log("[GlossPlusOne:router] Learned phrases reset");
       break;
     }
 
