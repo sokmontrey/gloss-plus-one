@@ -15,6 +15,9 @@ export async function routeBackgroundMessage(
     }
 
     case "REQUEST_PLAN": {
+      console.log(
+        `[GlossPlusOne:router] REQUEST_PLAN received — ${message.payload.paragraphs.length} paragraphs`,
+      );
       const plans = await buildReplacementPlans(message.payload);
       const tabId = sender.tab?.id;
 
@@ -28,6 +31,7 @@ export async function routeBackgroundMessage(
         payload: plans,
       };
 
+      console.log(`[GlossPlusOne:router] PLAN_READY sending — ${plans.length} plans`);
       chrome.tabs.sendMessage(tabId, response).catch((error) => {
         console.warn("[GlossPlusOne/background] Failed to send PLAN_READY", error);
       });

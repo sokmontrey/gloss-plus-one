@@ -83,8 +83,15 @@ function getChunkRangeInFullRaw(
  * Skips if a wrapper with this id already exists. Does not replace if text doesn't match.
  */
 export function applyReplacement(instruction: ReplacementInstruction): boolean {
+  const expectedPhrase = instruction.sourceText.slice(instruction.start, instruction.end);
+  console.log(
+    `[GlossPlusOne:renderer] Applying instruction: domPath=${instruction.domPath} phrase=${JSON.stringify(expectedPhrase)} replacement=${JSON.stringify(instruction.replacementText)}`,
+  );
   const el = resolveDomPath(instruction.domPath);
-  if (!el) return false;
+  if (!el) {
+    console.warn(`[GlossPlusOne:renderer] WARN: domPath not resolved: ${instruction.domPath}`);
+    return false;
+  }
 
   if (el.querySelector(`[${GLOSS_MARKER_ATTR}="${instruction.id}"]`)) return true;
 
@@ -94,6 +101,11 @@ export function applyReplacement(instruction: ReplacementInstruction): boolean {
   if (chunkIndex === -1) return false;
 
   const chunk = chunks[chunkIndex];
+  const actualPhrase = chunk.normalized.slice(instruction.start, instruction.end);
+  if (actualPhrase !== expectedPhrase) {
+    console.warn(`[GlossPlusOne:renderer] WARN: phrase not found in text node: ${expectedPhrase}`);
+    return false;
+  }
   const rawStart = normalizedToRawOffset(chunk.raw, Math.min(instruction.start, chunk.normalized.length));
   const rawEnd = normalizedToRawOffset(chunk.raw, Math.min(instruction.end, chunk.normalized.length));
   if (rawStart >= chunk.raw.length || rawEnd > chunk.raw.length || rawStart >= rawEnd)
@@ -149,6 +161,9 @@ export function applyReplacement(instruction: ReplacementInstruction): boolean {
   } catch {
     return false;
   }
+  console.log(
+    `[GlossPlusOne:renderer] Wrapped span at offsets ${instruction.start}-${instruction.end}`,
+  );
   return true;
 }
 

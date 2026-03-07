@@ -28,6 +28,7 @@ export async function callGemini(prompt: string): Promise<string> {
   const timeoutId = globalThis.setTimeout(() => controller.abort(), GEMINI_TIMEOUT_MS);
 
   try {
+    console.log(`[GlossPlusOne:gemini] Sending prompt — ${prompt.length} chars`);
     const response = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`,
       {
@@ -57,6 +58,7 @@ export async function callGemini(prompt: string): Promise<string> {
       throw new Error("GEMINI_EMPTY_RESPONSE");
     }
 
+    console.log(`[GlossPlusOne:gemini] Response received — ${text.length} chars`);
     return text;
   } catch (error) {
     if (error instanceof Error && error.name === "AbortError") {

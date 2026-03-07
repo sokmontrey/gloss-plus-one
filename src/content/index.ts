@@ -3,14 +3,18 @@ import { enrichPageContent } from "./reader/enricher";
 import { createMetrics } from "./reader/metrics";
 import { createReaderObserver } from "./reader/observer";
 import { withReadOnlyDomGuard } from "./reader/runtimeGuards";
-import type { BackgroundToContentMessage, ReplacementInstruction } from "@/shared/messages";
+import type {
+  BackgroundToContentMessage,
+  ReplacementInstruction,
+  SerializableParagraph,
+} from "@/shared/messages";
 import { injectOutputStyles, applyOutputAndAnimate } from "./output";
-import type { PageContent, ReplacementPlan } from "@/shared/types";
+import type { ReplacementPlan } from "@/shared/types";
 
 injectOutputStyles(document);
 
 const metrics = createMetrics(import.meta.env.DEV);
-let latestPageContent: PageContent | null = null;
+let lastExtractedParagraphs: SerializableParagraph[] = [];
 
 function normalizeText(text: string): string {
   return text.replace(/\s+/g, " ").trim();
@@ -52,18 +56,20 @@ function findUnusedPhraseRange(
 
 function buildInstructionsFromPlans(
   plans: ReplacementPlan[],
-  content: PageContent,
+  paragraphs: SerializableParagraph[],
 ): ReplacementInstruction[] {
-  const paragraphByIndex = new Map(content.paragraphs.map((paragraph) => [paragraph.index, paragraph]));
-  let nextId = 0;
+  const paragraphByIndex = new Map(paragraphs.map((paragraph) => [paragraph.index, paragraph]));
 
   return plans.flatMap((plan) => {
     const paragraph = paragraphByIndex.get(plan.paragraphIndex);
     if (!paragraph) {
+      console.warn(
+        `[GlossPlusOne:content] No paragraph found for index ${plan.paragraphIndex}`,
+      );
       return [];
     }
 
-    const sourceText = normalizeText(paragraph.text);
+    const sourceText = normalizeText(plan.originalText);
     const usedRanges: Array<{ start: number; end: number }> = [];
 
     return plan.replacements.flatMap((replacement) => {
@@ -75,7 +81,9 @@ function buildInstructionsFromPlans(
       );
 
       if (!range) {
-        console.warn("[GlossPlusOne] Could not map replacement onto paragraph text", replacement);
+        console.warn(
+          `[GlossPlusOne:content] targetPhrase not found in originalText: "${replacement.targetPhrase}"`,
+        );
         return [];
       }
 
@@ -83,7 +91,7 @@ function buildInstructionsFromPlans(
 
       return [
         {
-          id: `plan-${plan.paragraphIndex}-${nextId++}`,
+          id: crypto.randomUUID(),
           domPath: paragraph.domPath,
           sourceText,
           replacementText: replacement.foreignPhrase,
@@ -99,8 +107,18 @@ function runExtraction(trigger: "initial" | "mutation") {
   const run = metrics.start(trigger === "initial" ? "initial" : "delta");
   const content = withReadOnlyDomGuard(() => enrichPageContent(document));
   metrics.end(run);
-  latestPageContent = content;
+  lastExtractedParagraphs = content.paragraphs.map((paragraph) => ({
+    index: paragraph.index,
+    text: paragraph.text,
+    wordCount: paragraph.wordCount,
+    domPath: paragraph.domPath,
+    readingOrder: paragraph.readingOrder,
+  }));
+  console.log(
+    `[GlossPlusOne:content] Extraction complete — ${lastExtractedParagraphs.length} paragraphs`,
+  );
   sendRequestPlan(trigger, content);
+  console.log("[GlossPlusOne:content] REQUEST_PLAN sent");
 }
 
 onApplyOutput((payload) => {
@@ -126,31 +144,15 @@ chrome.runtime.onMessage.addListener((message: BackgroundToContentMessage) => {
     return;
   }
 
-  console.group("[GlossPlusOne] PLAN_READY received");
-  console.log("plans:", message.payload);
   console.log(
-    "total replacements:",
-    message.payload.reduce((sum, plan) => sum + plan.replacements.length, 0),
+    `[GlossPlusOne:content] PLAN_READY received — ${message.payload.length} plans`,
   );
-  console.table(
-    message.payload.flatMap((plan) =>
-      plan.replacements.map((replacement) => ({
-        paragraph: plan.paragraphIndex,
-        target: replacement.targetPhrase,
-        foreign: replacement.foreignPhrase,
-        type: replacement.replacementType,
-        reason: replacement.pedagogicalReason,
-      })),
-    ),
+  const instructions = buildInstructionsFromPlans(message.payload, lastExtractedParagraphs);
+  console.log(
+    `[GlossPlusOne:content] Built ${instructions.length} instructions from plans`,
   );
-  console.groupEnd();
-
-  if (!latestPageContent) {
-    return;
-  }
-
-  const instructions = buildInstructionsFromPlans(message.payload, latestPageContent);
   if (instructions.length > 0) {
+    console.log("[GlossPlusOne:content] Applying instructions to DOM");
     applyOutputAndAnimate(instructions);
   }
 });

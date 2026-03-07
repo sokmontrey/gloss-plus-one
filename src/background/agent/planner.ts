@@ -2,9 +2,9 @@ import { callGemini } from "@/background/api/gemini";
 import { calculateBudget } from "@/background/agent/budget";
 import { buildReplacementPrompt } from "@/background/agent/prompt";
 import { getUserContext } from "@/background/memory/store";
+import type { SerializablePageContent } from "@/shared/messages";
 import type {
   ArticleContext,
-  PageContent,
   PlannedReplacement,
   ReplacementBudget,
   ReplacementManifest,
@@ -12,7 +12,7 @@ import type {
   UserContext,
 } from "@/shared/types";
 
-const MODEL_USED = "gemini-2.5-flash-lite-latest";
+const MODEL_USED = "gemini-2.0-flash";
 
 function stripMarkdownFences(raw: string): string {
   const trimmed = raw.trim();
@@ -93,7 +93,7 @@ function parseManifest(
 
 function validateManifest(
   manifest: ReplacementManifest,
-  paragraphs: PageContent["paragraphs"],
+  paragraphs: SerializablePageContent["paragraphs"],
 ): { kept: PlannedReplacement[]; discarded: number } {
   const paragraphByIndex = new Map(paragraphs.map((paragraph) => [paragraph.index, paragraph]));
   const kept: PlannedReplacement[] = [];
@@ -118,7 +118,7 @@ function validateManifest(
 
 function groupByParagraph(
   replacements: PlannedReplacement[],
-  paragraphs: PageContent["paragraphs"],
+  paragraphs: SerializablePageContent["paragraphs"],
 ): ReplacementPlan[] {
   const paragraphLookup = new Map(paragraphs.map((paragraph) => [paragraph.index, paragraph.text]));
   const grouped = new Map<number, PlannedReplacement[]>();
@@ -143,7 +143,9 @@ function groupByParagraph(
     }));
 }
 
-export async function buildReplacementPlans(content: PageContent): Promise<ReplacementPlan[]> {
+export async function buildReplacementPlans(
+  content: SerializablePageContent,
+): Promise<ReplacementPlan[]> {
   try {
     console.log(
       `[GlossPlusOne:planner] REQUEST received - ${content.paragraphs.length} paragraphs, ${content.pageType}, ${content.domain}`,
@@ -151,7 +153,7 @@ export async function buildReplacementPlans(content: PageContent): Promise<Repla
 
     const userContext = await getUserContext();
     const budget = calculateBudget(content.paragraphs, userContext);
-    console.log(`[GlossPlusOne:planner] Budget calculated - ${budget.totalBudget} total replacements`);
+    console.log(`[GlossPlusOne:planner] Budget: ${budget.totalBudget} total replacements`);
 
     const prompt = buildReplacementPrompt(
       content.paragraphs,
@@ -167,13 +169,11 @@ export async function buildReplacementPlans(content: PageContent): Promise<Repla
     console.log("[GlossPlusOne:planner] Gemini call started");
     const startedAt = Date.now();
     const rawResponse = await callGemini(prompt);
-    console.log(`[GlossPlusOne:planner] Gemini responded - ${Date.now() - startedAt}ms`);
+    console.log(`[GlossPlusOne:planner] Gemini responded — ${Date.now() - startedAt}ms`);
 
     const manifest = parseManifest(rawResponse, userContext, budget);
     const { kept, discarded } = validateManifest(manifest, content.paragraphs);
-    console.log(
-      `[GlossPlusOne:planner] Manifest validated - ${kept.length} replacements kept, ${discarded} discarded`,
-    );
+    console.log(`[GlossPlusOne:planner] Validated: ${kept.length} kept, ${discarded} discarded`);
 
     const plans = groupByParagraph(kept, content.paragraphs);
     console.log(`[GlossPlusOne:planner] PLAN_READY - ${plans.length} ReplacementPlans`);
