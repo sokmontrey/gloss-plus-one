@@ -68,6 +68,8 @@ function parseManifest(
   budget: ReplacementBudget,
 ): ReplacementManifest {
   const normalized = stripMarkdownFences(raw);
+  console.log("[GlossPlusOne:planner] Raw manifest text:", raw);
+  console.log("[GlossPlusOne:planner] Normalzeda text:", normalized);
   const parsed = JSON.parse(normalized) as unknown;
 
   if (!isRecord(parsed)) {

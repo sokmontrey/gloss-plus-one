@@ -74,13 +74,11 @@ async function getOrCreateThreadId(): Promise<string> {
     throw new Error("BACKBOARD_CONFIG_MISSING");
   }
 
-  const res = await fetch(`${BACKBOARD_API_BASE}/threads`, {
+  const res = await fetch(`${BACKBOARD_API_BASE}/assistants/${assistantId}/threads`, {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
+      "X-API-Key": apiKey,
     },
-    body: JSON.stringify({ assistant_id: assistantId }),
   });
 
   if (!res.ok) {
@@ -121,11 +119,11 @@ export async function callBackboard(prompt: string): Promise<string> {
     const res = await fetch(`${BACKBOARD_API_BASE}/threads/${threadId}/messages`, {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
+        "X-API-Key": apiKey,
       },
-      body: JSON.stringify({
+      body: new URLSearchParams({
         content: prompt,
+        stream: "false",
         memory: "Auto",
       }),
       signal: controller.signal,
