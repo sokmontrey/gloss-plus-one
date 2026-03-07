@@ -22,6 +22,7 @@ let planRequestPending = false;
 let latestPageMeta: Pick<PageContent, "url" | "title" | "domain" | "pageType" | "language"> | null = null;
 let scrollTimer: ReturnType<typeof window.setTimeout> | null = null;
 let mutationTimer: ReturnType<typeof window.setTimeout> | null = null;
+let lastScrollY = window.scrollY;
 
 function normalizeText(text: string): string {
   return text.replace(/\s+/g, " ").trim();
@@ -244,6 +245,14 @@ if (document.body) {
 window.addEventListener(
   "scroll",
   () => {
+    const nextScrollY = window.scrollY;
+    const scrollingDown = nextScrollY > lastScrollY;
+    lastScrollY = nextScrollY;
+
+    if (!scrollingDown) {
+      return;
+    }
+
     if (scrollTimer !== null) {
       window.clearTimeout(scrollTimer);
     }
