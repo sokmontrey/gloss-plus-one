@@ -1,10 +1,11 @@
-import { callGemini } from "@/background/api/gemini";
+import { callBackboard } from "@/background/api/backboard";
 import { calculateBudget } from "@/background/agent/budget";
 import { buildReplacementPrompt } from "@/background/agent/prompt";
 import { getUserContext } from "@/background/memory/store";
 import type { SerializablePageContent } from "@/shared/messages";
 import type {
   ArticleContext,
+  ExtractedParagraph,
   PlannedReplacement,
   ReplacementBudget,
   ReplacementManifest,
@@ -12,7 +13,7 @@ import type {
   UserContext,
 } from "@/shared/types";
 
-const MODEL_USED = "gemini-2.0-flash";
+const MODEL_USED = "backboard/gemini-2.0-flash";
 
 function stripMarkdownFences(raw: string): string {
   const trimmed = raw.trim();
@@ -152,11 +153,12 @@ export async function buildReplacementPlans(
     );
 
     const userContext = await getUserContext();
-    const budget = calculateBudget(content.paragraphs, userContext);
+    const extractedParagraphs = content.paragraphs as unknown as ExtractedParagraph[];
+    const budget = calculateBudget(extractedParagraphs, userContext);
     console.log(`[GlossPlusOne:planner] Budget: ${budget.totalBudget} total replacements`);
 
     const prompt = buildReplacementPrompt(
-      content.paragraphs,
+      extractedParagraphs,
       userContext,
       {
         title: content.title,
@@ -168,8 +170,8 @@ export async function buildReplacementPlans(
 
     console.log("[GlossPlusOne:planner] Gemini call started");
     const startedAt = Date.now();
-    const rawResponse = await callGemini(prompt);
-    console.log(`[GlossPlusOne:planner] Gemini responded — ${Date.now() - startedAt}ms`);
+    const rawResponse = await callBackboard(prompt);
+    console.log(`[GlossPlusOne:planner] Backboard responded — ${Date.now() - startedAt}ms`);
 
     const manifest = parseManifest(rawResponse, userContext, budget);
     const { kept, discarded } = validateManifest(manifest, content.paragraphs);
