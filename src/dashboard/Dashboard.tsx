@@ -11,9 +11,11 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Slider } from "@/components/ui/slider";
+import { Switch } from "@/components/ui/switch";
 import { SUPPORTED_TARGET_LANGUAGES, TARGET_LANGUAGE_LABELS } from "@/shared/languages";
 import { BANK_KEY, getPhraseBankFromSnapshot } from "@/shared/phraseBankStorage";
-import type { BankPhrase, PhraseBank, ProgressionConfig, UserContext } from "@/shared/types";
+import type { BankPhrase, DisplayConfig, PhraseBank, ProgressionConfig, UserContext } from "@/shared/types";
+import { DEFAULT_DISPLAY_CONFIG } from "@/shared/types";
 
 const CONFIG_KEY = "glossProgressionConfig";
 const USER_CONTEXT_KEY = "userContext";
@@ -32,6 +34,7 @@ interface DashboardState {
   targetLanguage: UserContext["targetLanguage"];
   assessmentScore: number;
   assessmentHistory: UserContext["assessmentHistory"];
+  displayConfig: DisplayConfig;
 }
 
 function thresholdToSliderValue(threshold: number): number {
@@ -45,6 +48,18 @@ function thresholdToSliderValue(threshold: number): number {
 
 function sliderValueToThreshold(value: number): number {
   return PROGRESSION_STEPS[Math.max(0, Math.min(PROGRESSION_STEPS.length - 1, value - 1))] ?? 0.7;
+}
+
+function hslToHex(h: number, s: number, l: number): string {
+  s /= 100;
+  l /= 100;
+  const a = s * Math.min(l, 1 - l);
+  const f = (n: number) => {
+    const k = (n + h / 30) % 12;
+    const color = l - a * Math.max(Math.min(k - 3, 9 - k, 1), -1);
+    return Math.round(255 * color).toString(16).padStart(2, "0");
+  };
+  return `#${f(0)}${f(8)}${f(4)}`;
 }
 
 function confidenceVariant(confidence: number): "success" | "warning" | "muted" {
@@ -122,6 +137,7 @@ export default function Dashboard() {
     targetLanguage: "es",
     assessmentScore: 0,
     assessmentHistory: [],
+    displayConfig: { ...DEFAULT_DISPLAY_CONFIG },
   });
   const [plannerQueued, setPlannerQueued] = useState(false);
 
@@ -149,6 +165,7 @@ export default function Dashboard() {
         targetLanguage,
         assessmentScore: userContext?.assessmentScore ?? 0,
         assessmentHistory: userContext?.assessmentHistory ?? [],
+        displayConfig: userContext?.displayConfig ?? { ...DEFAULT_DISPLAY_CONFIG },
       });
       setPlannerQueued(false);
     };
@@ -199,6 +216,33 @@ export default function Dashboard() {
         targetLanguage: nextLanguage,
       },
     });
+  };
+
+  const handleDisplayConfigChange = (patch: Partial<DisplayConfig>) => {
+    const nextConfig = { ...state.displayConfig, ...patch };
+    setState((current) => ({ ...current, displayConfig: nextConfig }));
+  };
+
+  const saveDisplayConfig = async () => {
+    const result = await chrome.storage.local.get([USER_CONTEXT_KEY]);
+    const currentUserContext = (result[USER_CONTEXT_KEY] as Partial<UserContext> | undefined) ?? {};
+    await chrome.storage.local.set({
+      [USER_CONTEXT_KEY]: {
+        ...currentUserContext,
+        displayConfig: state.displayConfig,
+      },
+    });
+  };
+
+  const resetDisplayConfig = () => {
+    setState((current) => ({ ...current, displayConfig: { ...DEFAULT_DISPLAY_CONFIG } }));
+  };
+
+  const [isSaved, setIsSaved] = useState(false);
+  const saveDisplayConfigWithFeedback = async () => {
+    await saveDisplayConfig();
+    setIsSaved(true);
+    setTimeout(() => setIsSaved(false), 2000);
   };
 
   return (
@@ -300,6 +344,128 @@ export default function Dashboard() {
               onValueChange={(values) => void handleThresholdChange(values[0])}
               className="mt-5"
             />
+          </div>
+        </section>
+
+        {/* Display Settings */}
+        <section className="mb-8 rounded-lg border border-border bg-muted/30 p-4">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-sm font-medium">Display Settings</h2>
+            <div className="flex items-center gap-2">
+              <Button variant="outline" size="sm" onClick={resetDisplayConfig}>
+                Reset
+              </Button>
+              <Button size="sm" onClick={() => void saveDisplayConfigWithFeedback()}>
+                {isSaved ? "Saved!" : "Save Changes"}
+              </Button>
+            </div>
+          </div>
+          <div className="grid gap-5 md:grid-cols-2">
+
+            {/* Highlight Hue */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-muted-foreground">Highlight Color</span>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="color"
+                    value={hslToHex(state.displayConfig.highlightHue, 96, 56)}
+                    onChange={(e) => {
+                      // Extract hue from hex color
+                      const hex = e.target.value;
+                      const r = parseInt(hex.slice(1, 3), 16) / 255;
+                      const g = parseInt(hex.slice(3, 5), 16) / 255;
+                      const b = parseInt(hex.slice(5, 7), 16) / 255;
+                      const max = Math.max(r, g, b);
+                      const min = Math.min(r, g, b);
+                      let h = 0;
+                      if (max !== min) {
+                        const d = max - min;
+                        if (max === r) h = ((g - b) / d + (g < b ? 6 : 0)) * 60;
+                        else if (max === g) h = ((b - r) / d + 2) * 60;
+                        else h = ((r - g) / d + 4) * 60;
+                      }
+                      void handleDisplayConfigChange({ highlightHue: Math.round(h) });
+                    }}
+                    className="h-7 w-7 cursor-pointer rounded-md border border-border bg-transparent p-0 [&::-webkit-color-swatch-wrapper]:p-0 [&::-webkit-color-swatch]:rounded-md [&::-webkit-color-swatch]:border-none"
+                    title="Pick a color"
+                  />
+                  <div
+                    className="h-5 w-10 rounded-md border border-border"
+                    style={{ backgroundColor: `hsl(${state.displayConfig.highlightHue}, 96%, 56%)` }}
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* High Intensity */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-muted-foreground">High Intensity</span>
+                <Badge variant="outline">{Math.round(state.displayConfig.highlightIntensityHigh * 100)}%</Badge>
+              </div>
+              <Slider
+                min={5}
+                max={60}
+                step={1}
+                value={[Math.round(state.displayConfig.highlightIntensityHigh * 100)]}
+                onValueChange={(v) => void handleDisplayConfigChange({ highlightIntensityHigh: v[0] / 100 })}
+              />
+            </div>
+
+            {/* Low Intensity */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-muted-foreground">Low Intensity</span>
+                <Badge variant="outline">{Math.round(state.displayConfig.highlightIntensityLow * 100)}%</Badge>
+              </div>
+              <Slider
+                min={0}
+                max={30}
+                step={1}
+                value={[Math.round(state.displayConfig.highlightIntensityLow * 100)]}
+                onValueChange={(v) => void handleDisplayConfigChange({ highlightIntensityLow: v[0] / 100 })}
+              />
+            </div>
+
+            {/* Spacer to balance 2-col grid */}
+            <div />
+
+            {/* Toggle: Underline */}
+            <div className="flex items-center justify-between">
+              <span className="text-xs">Show Underline</span>
+              <Switch
+                checked={state.displayConfig.showUnderline}
+                onCheckedChange={(v) => void handleDisplayConfigChange({ showUnderline: v })}
+              />
+            </div>
+
+            {/* Toggle: Entry Animation */}
+            <div className="flex items-center justify-between">
+              <span className="text-xs">Entry Animation</span>
+              <Switch
+                checked={state.displayConfig.showEntryAnimation}
+                onCheckedChange={(v) => void handleDisplayConfigChange({ showEntryAnimation: v })}
+              />
+            </div>
+
+            {/* Toggle: Bold Structural */}
+            <div className="flex items-center justify-between">
+              <span className="text-xs">Bold Structural Phrases</span>
+              <Switch
+                checked={state.displayConfig.boldStructural}
+                onCheckedChange={(v) => void handleDisplayConfigChange({ boldStructural: v })}
+              />
+            </div>
+
+            {/* Toggle: Italic Lexical */}
+            <div className="flex items-center justify-between">
+              <span className="text-xs">Italic Lexical Phrases</span>
+              <Switch
+                checked={state.displayConfig.italicLexical}
+                onCheckedChange={(v) => void handleDisplayConfigChange({ italicLexical: v })}
+              />
+            </div>
           </div>
         </section>
 

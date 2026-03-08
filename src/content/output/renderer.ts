@@ -1,4 +1,6 @@
 import type { ReplacementInstruction } from "@/shared/messages";
+import type { DisplayConfig } from "@/shared/types";
+import { DEFAULT_DISPLAY_CONFIG } from "@/shared/types";
 import { resolveDomPath } from "@/content/reader/domPath";
 import {
   GLOSS_MARKER_ATTR,
@@ -12,6 +14,12 @@ function getTextNodesInOrder(root: Element): Text[] {
   let n: Text | null;
   while ((n = walker.nextNode() as Text | null)) nodes.push(n);
   return nodes;
+}
+
+let currentDisplayConfig: DisplayConfig = { ...DEFAULT_DISPLAY_CONFIG };
+
+export function setDisplayConfig(config: DisplayConfig): void {
+  currentDisplayConfig = config;
 }
 
 function getChunksFromElement(element: Element): { raw: string; normalized: string }[] {
@@ -107,6 +115,11 @@ function buildReplacementSpan(instruction: ReplacementInstruction): HTMLSpanElem
   span.style.setProperty("--gloss-entry-ms", isReinforcement ? "460ms" : "720ms");
   span.style.setProperty("--gloss-entry-delay", `${Math.min(180, instruction.start * 10)}ms`);
   span.style.setProperty("--gloss-entry-lift", isReinforcement ? "0.16em" : "0.24em");
+  span.setAttribute("data-gloss-bold", String(currentDisplayConfig.boldStructural));
+  span.setAttribute("data-gloss-italic", String(currentDisplayConfig.italicLexical));
+  if (!currentDisplayConfig.showEntryAnimation) {
+    span.setAttribute("data-gloss-no-animation", "true");
+  }
   return span;
 }
 

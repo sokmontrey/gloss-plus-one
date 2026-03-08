@@ -1,17 +1,27 @@
 import { extractParagraphs } from "./reader/parser";
 import { enrichPageContent } from "./reader/enricher";
 import { resolveDomPath } from "./reader/domPath";
-import { applyOutputAndAnimate, clearOutput, injectOutputStyles } from "./output";
+import { applyOutputAndAnimate, clearOutput, injectOutputStyles, setDisplayConfig } from "./output";
 import { initHoverListeners } from "./overlay/tooltipManager";
 import { initSelectionPlayer } from "./overlay/selectionPlayer";
 import { isPageDisabled } from "@/shared/pageDisable";
 import { BANK_KEY, getPhraseBankFromSnapshot } from "@/shared/phraseBankStorage";
 import type { PopupToContentMessage, ReplacementInstruction } from "@/shared/messages";
-import type { BankPhrase, UserContext } from "@/shared/types";
+import type { BankPhrase, DisplayConfig, UserContext } from "@/shared/types";
+import { DEFAULT_DISPLAY_CONFIG } from "@/shared/types";
 
 injectOutputStyles(document);
 
 const USER_CONTEXT_KEY = "userContext";
+
+function applyDisplayConfigCssVars(config: DisplayConfig): void {
+  const root = document.documentElement;
+  root.style.setProperty("--gloss-hue", String(config.highlightHue));
+  root.style.setProperty("--gloss-intensity-high", String(config.highlightIntensityHigh));
+  root.style.setProperty("--gloss-intensity-low", String(config.highlightIntensityLow));
+  root.style.setProperty("--gloss-underline-value", config.showUnderline ? "underline" : "none");
+  setDisplayConfig(config);
+}
 
 let userContext: UserContext | null = null;
 let initialized = false;
@@ -128,6 +138,7 @@ async function boot(): Promise<void> {
   }
 
   userContext = await getUserContextLocal();
+  applyDisplayConfigCssVars(userContext.displayConfig ?? { ...DEFAULT_DISPLAY_CONFIG });
   initHoverListeners();
   initSelectionPlayer(userContext.targetLanguage);
 
@@ -366,6 +377,7 @@ chrome.storage.onChanged.addListener((changes, area) => {
   if (changes[USER_CONTEXT_KEY]) {
     void getUserContextLocal().then(async (nextContext) => {
       userContext = nextContext;
+      applyDisplayConfigCssVars(nextContext.displayConfig ?? { ...DEFAULT_DISPLAY_CONFIG });
       initSelectionPlayer(nextContext.targetLanguage);
       discoveryStarted = false;
       waitingForInitialBank = false;

@@ -15,6 +15,33 @@ export interface AssessmentHistoryEntry {
   timestamp: number;
 }
 
+export interface DisplayConfig {
+  /** Primary hue (0–360) for replacement highlights */
+  highlightHue: number;
+  /** High-confidence opacity (0–1). Controls "bright" highlight intensity */
+  highlightIntensityHigh: number;
+  /** Low-confidence opacity (0–1). Controls "dim" highlight intensity */
+  highlightIntensityLow: number;
+  /** Whether to show underline on replacements */
+  showUnderline: boolean;
+  /** Whether to show the entry animation */
+  showEntryAnimation: boolean;
+  /** Whether structural phrases are bold */
+  boldStructural: boolean;
+  /** Whether lexical phrases are italic */
+  italicLexical: boolean;
+}
+
+export const DEFAULT_DISPLAY_CONFIG: DisplayConfig = {
+  highlightHue: 43,
+  highlightIntensityHigh: 0.2,
+  highlightIntensityLow: 0.01,
+  showUnderline: true,
+  showEntryAnimation: true,
+  boldStructural: true,
+  italicLexical: true,
+};
+
 export interface UserContext {
   cefrBand: "A1" | "A2" | "B1" | "B2" | "C1" | "C2";
   cefrConfidence: number;
@@ -32,6 +59,7 @@ export interface UserContext {
   assessmentScore?: number;
   assessmentHistory?: AssessmentHistoryEntry[];
   badges?: string[];
+  displayConfig?: DisplayConfig;
 }
 
 export interface BankPhrase {

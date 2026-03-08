@@ -3,6 +3,17 @@ import { GLOSS_REVEALED_CLASS } from "./viewport";
 
 /** Injected into the page for replacement wrappers. Scoped to avoid affecting host. */
 export const OUTPUT_STYLES = `
+:root {
+  --gloss-hue: 43;
+  --gloss-sat: 96%;
+  --gloss-lum: 56%;
+  --gloss-intensity-high: 0.2;
+  --gloss-intensity-low: 0.01;
+  --gloss-show-underline: 1;
+  --gloss-bold-structural: 1;
+  --gloss-italic-lexical: 1;
+  --gloss-show-animation: 1;
+}
 .${GLOSS_WRAPPER_CLASS} {
   cursor: pointer;
   border-radius: 2px;
@@ -18,24 +29,31 @@ export const OUTPUT_STYLES = `
     background-color 0.3s ease,
     text-decoration-color 0.3s ease;
 }
+.${GLOSS_WRAPPER_CLASS}[data-gloss-no-animation="true"] {
+  opacity: 1 !important;
+  transform: none !important;
+  filter: none !important;
+  animation: none !important;
+  transition: background-color 0.3s ease, text-decoration-color 0.3s ease !important;
+}
 .${GLOSS_WRAPPER_CLASS}[data-gloss-reinforcement="false"] {
-  background-color: rgba(251, 191, 36, 0.2);
-  text-decoration: underline;
-  text-decoration-color: rgba(251, 191, 36, 0.9);
+  background-color: hsla(var(--gloss-hue), var(--gloss-sat), var(--gloss-lum), var(--gloss-intensity-high));
+  text-decoration: var(--gloss-underline-value, underline);
+  text-decoration-color: hsla(var(--gloss-hue), var(--gloss-sat), var(--gloss-lum), 0.9);
   text-decoration-thickness: 2px;
   text-underline-offset: 3px;
 }
 .${GLOSS_WRAPPER_CLASS}[data-gloss-reinforcement="true"] {
-  background-color: rgba(251, 191, 36, calc(0.18 - (var(--gloss-confidence, 0) * 0.17)));
-  text-decoration: underline;
-  text-decoration-color: rgba(251, 191, 36, calc(0.9 - (var(--gloss-confidence, 0) * 0.8)));
+  background-color: hsla(var(--gloss-hue), var(--gloss-sat), var(--gloss-lum), calc(var(--gloss-intensity-high) - (var(--gloss-confidence, 0) * (var(--gloss-intensity-high) - var(--gloss-intensity-low)))));
+  text-decoration: var(--gloss-underline-value, underline);
+  text-decoration-color: hsla(var(--gloss-hue), var(--gloss-sat), var(--gloss-lum), calc(0.9 - (var(--gloss-confidence, 0) * 0.8)));
   text-decoration-thickness: 2px;
   text-underline-offset: 3px;
 }
-.${GLOSS_WRAPPER_CLASS}[data-gloss-phrase-type="structural"] {
+.${GLOSS_WRAPPER_CLASS}[data-gloss-phrase-type="structural"][data-gloss-bold="true"] {
   font-weight: 500;
 }
-.${GLOSS_WRAPPER_CLASS}[data-gloss-phrase-type="lexical"] {
+.${GLOSS_WRAPPER_CLASS}[data-gloss-phrase-type="lexical"][data-gloss-italic="true"] {
   font-style: italic;
 }
 .${GLOSS_WRAPPER_CLASS}.${GLOSS_REVEALED_CLASS} {
@@ -45,8 +63,8 @@ export const OUTPUT_STYLES = `
   animation: gloss-plus-one-informed-entry var(--gloss-entry-ms, 600ms) cubic-bezier(0.22, 1, 0.36, 1) var(--gloss-entry-delay, 0ms) both;
 }
 .${GLOSS_WRAPPER_CLASS}:hover {
-  background-color: rgba(251, 191, 36, 0.3) !important;
-  outline: 1px solid rgba(251, 191, 36, 0.6);
+  background-color: hsla(var(--gloss-hue), var(--gloss-sat), var(--gloss-lum), 0.3) !important;
+  outline: 1px solid hsla(var(--gloss-hue), var(--gloss-sat), var(--gloss-lum), 0.6);
   border-radius: 2px;
 }
 
