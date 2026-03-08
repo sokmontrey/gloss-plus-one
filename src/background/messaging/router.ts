@@ -26,6 +26,7 @@ export async function routeBackgroundMessage(
     case "GET_BANK": {
       const bank = await getPhraseBank(message.payload.language);
       sendResponse({
+        language: message.payload.language,
         phrases: bank.phrases,
         currentTier: bank.currentTier,
         lastBatchId: bank.lastBatchId,
@@ -66,6 +67,7 @@ export async function routeBackgroundMessage(
         const response: BackgroundToContentMessage = {
           type: "BANK_READY",
           payload: {
+            language,
             phrases: bank.phrases,
             currentTier: bank.currentTier,
             lastBatchId: bank.lastBatchId,
@@ -226,6 +228,7 @@ Reply ONLY with valid JSON:
           const response: BackgroundToContentMessage = {
             type: "BANK_READY",
             payload: {
+              language,
               phrases: bank.phrases,
               currentTier: bank.currentTier,
               lastBatchId: bank.lastBatchId,

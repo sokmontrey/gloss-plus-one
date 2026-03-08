@@ -24,6 +24,7 @@ export interface GetBankMessage {
 export interface BankReadyMessage {
   type: "BANK_READY";
   payload: {
+    language: string;
     phrases: BankPhrase[];
     currentTier: number;
     lastBatchId: string;

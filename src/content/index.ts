@@ -62,6 +62,54 @@ function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+function uppercaseFirstLetter(value: string): string {
+  const index = value.search(/\p{L}/u);
+  if (index === -1) {
+    return value;
+  }
+
+  return `${value.slice(0, index)}${value[index].toUpperCase()}${value.slice(index + 1)}`;
+}
+
+function titleCaseWords(value: string): string {
+  return value.replace(/\p{L}[\p{L}\p{M}'’-]*/gu, (word) => uppercaseFirstLetter(word.toLowerCase()));
+}
+
+function applyReplacementCasing(replacementText: string, matchedSource: string): string {
+  if (!matchedSource) {
+    return replacementText;
+  }
+
+  const lettersOnly = matchedSource.replace(/[^\p{L}\p{M}]+/gu, "");
+  if (lettersOnly && lettersOnly === lettersOnly.toUpperCase()) {
+    return replacementText.toUpperCase();
+  }
+
+  const sourceWords = matchedSource.match(/\p{L}[\p{L}\p{M}'’-]*/gu) ?? [];
+  if (
+    sourceWords.length > 1 &&
+    sourceWords.every((word) => word[0] === word[0].toUpperCase())
+  ) {
+    return titleCaseWords(replacementText);
+  }
+
+  const firstLetterIndex = matchedSource.search(/\p{L}/u);
+  if (firstLetterIndex !== -1 && matchedSource[firstLetterIndex] === matchedSource[firstLetterIndex].toUpperCase()) {
+    return uppercaseFirstLetter(replacementText);
+  }
+
+  return replacementText;
+}
+
+function getTargetLanguageFromContextSnapshot(value: unknown): string | null {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+
+  const candidate = value as Partial<UserContext>;
+  return typeof candidate.targetLanguage === "string" ? candidate.targetLanguage : null;
+}
+
 function buildInstructionsFromBank(
   paragraphs: SerializableParagraph[],
   bank: BankPhrase[],
@@ -91,12 +139,13 @@ function buildInstructionsFromBank(
         }
 
         usedRanges.push(range);
+        const matchedSource = sourceText.slice(range.start, range.end);
         instructions.push({
           id: crypto.randomUUID(),
           phraseId: bankPhrase.id,
           domPath: paragraph.domPath,
           sourceText,
-          replacementText: bankPhrase.targetPhrase,
+          replacementText: applyReplacementCasing(bankPhrase.targetPhrase, matchedSource),
           start: range.start,
           end: range.end,
           targetLanguage: bankPhrase.targetLanguage,
@@ -148,6 +197,7 @@ async function getBankPhrases(language: string): Promise<BankPhrase[]> {
     type: "GET_BANK",
     payload: { language },
   })) as {
+    language: string;
     phrases: BankPhrase[];
     currentTier: number;
     lastBatchId: string;
@@ -494,6 +544,10 @@ chrome.runtime.onMessage.addListener(
       return;
     }
 
+    if (message.payload.language !== currentLanguage) {
+      return;
+    }
+
     plannerRequested = false;
     currentBank = message.payload.phrases;
     currentTier = message.payload.currentTier;
@@ -509,16 +563,31 @@ chrome.runtime.onMessage.addListener(
 );
 
 chrome.storage.onChanged.addListener((changes, areaName) => {
-  if (areaName !== "local" || !changes[DISABLED_PAGES_KEY]) {
+  if (areaName !== "local") {
     return;
   }
 
-  const nextDisabled = isPageDisabledInSnapshot(window.location.href, changes[DISABLED_PAGES_KEY].newValue);
-  if (nextDisabled === pageDisabled) {
-    return;
+  if (changes[DISABLED_PAGES_KEY]) {
+    const nextDisabled = isPageDisabledInSnapshot(window.location.href, changes[DISABLED_PAGES_KEY].newValue);
+    if (nextDisabled !== pageDisabled) {
+      applyPageDisabledState(nextDisabled);
+    }
   }
 
-  applyPageDisabledState(nextDisabled);
+  if (changes[USER_CONTEXT_KEY]) {
+    const nextLanguage = getTargetLanguageFromContextSnapshot(changes[USER_CONTEXT_KEY].newValue);
+    if (!nextLanguage || nextLanguage === currentLanguage) {
+      return;
+    }
+
+    plannerRequested = false;
+    currentLanguage = nextLanguage;
+    currentBank = [];
+    hideInitializingState();
+    clearOutput(document);
+    processedParagraphKeys.clear();
+    void initPage();
+  }
 });
 
 window.setTimeout(() => {

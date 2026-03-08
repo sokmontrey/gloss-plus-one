@@ -2,9 +2,10 @@ import { useEffect, useMemo, useState } from "react";
 import { Minus, Plus } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { SUPPORTED_TARGET_LANGUAGES, TARGET_LANGUAGE_LABELS } from "@/shared/languages";
+import { BANK_KEY, getPhraseBankFromSnapshot } from "@/shared/phraseBankStorage";
 import type { BankPhrase, PhraseBank, ProgressionConfig, UserContext } from "@/shared/types";
 
-const BANK_KEY = "glossPhraseBank";
 const CONFIG_KEY = "glossProgressionConfig";
 const USER_CONTEXT_KEY = "userContext";
 const PROGRESSION_STEPS = [0.4, 0.55, 0.7, 0.82, 0.92] as const;
@@ -19,7 +20,7 @@ const DEFAULT_CONFIG: ProgressionConfig = {
 interface DashboardState {
   bank: PhraseBank | null;
   config: ProgressionConfig;
-  targetLanguage: string;
+  targetLanguage: UserContext["targetLanguage"];
 }
 
 function thresholdToSliderValue(threshold: number): number {
@@ -63,13 +64,14 @@ export default function Dashboard() {
     const refresh = async () => {
       const result = await chrome.storage.local.get([BANK_KEY, CONFIG_KEY, USER_CONTEXT_KEY]);
       const userContext = result[USER_CONTEXT_KEY] as Partial<UserContext> | undefined;
+      const targetLanguage = userContext?.targetLanguage ?? "es";
       setState({
-        bank: (result[BANK_KEY] as PhraseBank | undefined) ?? null,
+        bank: getPhraseBankFromSnapshot(result[BANK_KEY], targetLanguage),
         config: {
           ...DEFAULT_CONFIG,
           ...(result[CONFIG_KEY] as Partial<ProgressionConfig> | undefined),
         },
-        targetLanguage: userContext?.targetLanguage ?? "es",
+        targetLanguage,
       });
       setPlannerQueued(false);
     };
@@ -111,6 +113,17 @@ export default function Dashboard() {
     });
   };
 
+  const handleLanguageChange = async (nextLanguage: UserContext["targetLanguage"]) => {
+    const result = await chrome.storage.local.get([USER_CONTEXT_KEY]);
+    const currentUserContext = (result[USER_CONTEXT_KEY] as Partial<UserContext> | undefined) ?? {};
+    await chrome.storage.local.set({
+      [USER_CONTEXT_KEY]: {
+        ...currentUserContext,
+        targetLanguage: nextLanguage,
+      },
+    });
+  };
+
   return (
     <div className="min-h-screen bg-background text-foreground">
       <header className="sticky top-0 z-10 border-b border-border bg-background/95 px-6 py-4 backdrop-blur">
@@ -123,6 +136,26 @@ export default function Dashboard() {
 
       <div className="mx-auto max-w-4xl px-6 py-6">
         <section className="mb-8 grid gap-4 md:grid-cols-2">
+          <div className="rounded-lg border border-border bg-muted/30 p-4">
+            <div className="flex items-center justify-between gap-4">
+              <div>
+                <h2 className="text-sm font-medium">Learning Language</h2>
+                <p className="text-xs text-muted-foreground">Swap phrase banks and live page replacements</p>
+              </div>
+              <select
+                value={state.targetLanguage}
+                onChange={(event) => void handleLanguageChange(event.target.value as UserContext["targetLanguage"])}
+                className="h-9 rounded-md border border-border bg-background px-3 text-sm text-foreground"
+              >
+                {SUPPORTED_TARGET_LANGUAGES.map((language) => (
+                  <option key={language} value={language}>
+                    {TARGET_LANGUAGE_LABELS[language]}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
           <div className="rounded-lg border border-border bg-muted/30 p-4">
             <div className="flex items-center justify-between">
               <div>

@@ -1,6 +1,5 @@
+import { BANK_KEY, getPhraseBankFromSnapshot, savePhraseBankToSnapshot } from "@/shared/phraseBankStorage";
 import type { PhraseBank, ProgressionConfig } from "@/shared/types";
-
-const BANK_KEY = "glossPhraseBank";
 const CONFIG_KEY = "glossProgressionConfig";
 
 const DEFAULT_PROGRESSION_CONFIG: ProgressionConfig = {
@@ -10,35 +9,16 @@ const DEFAULT_PROGRESSION_CONFIG: ProgressionConfig = {
   hoverDecayThresholdMs: 2000,
 };
 
-function createEmptyBank(language: string): PhraseBank {
-  return {
-    phrases: [],
-    language,
-    currentTier: 1,
-    lastPlannerRunAt: 0,
-    lastBatchId: "",
-    batches: [],
-  };
-}
-
 export async function getPhraseBank(language: string): Promise<PhraseBank> {
   const result = await chrome.storage.local.get(BANK_KEY);
-  const stored = result[BANK_KEY] as PhraseBank | undefined;
-
-  if (!stored || stored.language !== language) {
-    return createEmptyBank(language);
-  }
-
-  return {
-    ...createEmptyBank(language),
-    ...stored,
-    phrases: stored.phrases ?? [],
-    batches: stored.batches ?? [],
-  };
+  return getPhraseBankFromSnapshot(result[BANK_KEY], language);
 }
 
 export async function savePhraseBank(bank: PhraseBank): Promise<void> {
-  await chrome.storage.local.set({ [BANK_KEY]: bank });
+  const result = await chrome.storage.local.get(BANK_KEY);
+  await chrome.storage.local.set({
+    [BANK_KEY]: savePhraseBankToSnapshot(result[BANK_KEY], bank),
+  });
 }
 
 export async function getProgressionConfig(): Promise<ProgressionConfig> {

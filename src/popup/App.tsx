@@ -2,15 +2,16 @@ import { useEffect, useMemo, useState } from "react";
 import { ExternalLink, Minus, Plus } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { SUPPORTED_TARGET_LANGUAGES, TARGET_LANGUAGE_LABELS } from "@/shared/languages";
 import {
   DISABLED_PAGES_KEY,
   isPageDisabled,
   isToggleablePageUrl,
   setPageDisabled,
 } from "@/shared/pageDisable";
+import { BANK_KEY, getPhraseBankFromSnapshot } from "@/shared/phraseBankStorage";
 import type { PhraseBank, ProgressionConfig, UserContext, UserInterestProfile } from "@/shared/types";
 
-const BANK_KEY = "glossPhraseBank";
 const CONFIG_KEY = "glossProgressionConfig";
 const INTEREST_KEY = "glossInterestProfile";
 const USER_CONTEXT_KEY = "userContext";
@@ -26,7 +27,7 @@ const DEFAULT_CONFIG: ProgressionConfig = {
 interface PopupState {
   bank: PhraseBank | null;
   config: ProgressionConfig;
-  targetLanguage: string;
+  targetLanguage: UserContext["targetLanguage"];
   profile: UserInterestProfile | null;
 }
 
@@ -137,13 +138,14 @@ export default function App() {
         getCurrentPageStatus(),
       ]);
       const userContext = result[USER_CONTEXT_KEY] as Partial<UserContext> | undefined;
+      const targetLanguage = userContext?.targetLanguage ?? "es";
       setState({
-        bank: (result[BANK_KEY] as PhraseBank | undefined) ?? null,
+        bank: getPhraseBankFromSnapshot(result[BANK_KEY], targetLanguage),
         config: {
           ...DEFAULT_CONFIG,
           ...(result[CONFIG_KEY] as Partial<ProgressionConfig> | undefined),
         },
-        targetLanguage: userContext?.targetLanguage ?? "es",
+        targetLanguage,
         profile: (result[INTEREST_KEY] as UserInterestProfile | undefined) ?? null,
       });
       setPageControl((current) => ({
@@ -197,6 +199,27 @@ export default function App() {
     });
   };
 
+  const handleLanguageChange = async (nextLanguage: UserContext["targetLanguage"]) => {
+    setState((current) => ({
+      ...current,
+      targetLanguage: nextLanguage,
+      bank: null,
+    }));
+
+    const result = await chrome.storage.local.get([USER_CONTEXT_KEY, BANK_KEY]);
+    const currentUserContext = (result[USER_CONTEXT_KEY] as Partial<UserContext> | undefined) ?? {};
+    setState((current) => ({
+      ...current,
+      bank: getPhraseBankFromSnapshot(result[BANK_KEY], nextLanguage),
+    }));
+    await chrome.storage.local.set({
+      [USER_CONTEXT_KEY]: {
+        ...currentUserContext,
+        targetLanguage: nextLanguage,
+      },
+    });
+  };
+
   const handlePageToggle = async () => {
     if (pageControl.status !== "ready" || !pageControl.url || pageControl.saving) {
       return;
@@ -231,6 +254,26 @@ export default function App() {
           {state.bank?.phrases.length ?? 0} phrases ready.
         </p>
       </div>
+
+      <section className="rounded-lg border border-border bg-muted/30 p-3">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <p className="text-xs font-medium">Learning Language</p>
+            <p className="text-[11px] text-muted-foreground">Switch banks and page replacements instantly</p>
+          </div>
+          <select
+            value={state.targetLanguage}
+            onChange={(event) => void handleLanguageChange(event.target.value as UserContext["targetLanguage"])}
+            className="h-8 rounded-md border border-border bg-background px-2 text-xs text-foreground"
+          >
+            {SUPPORTED_TARGET_LANGUAGES.map((language) => (
+              <option key={language} value={language}>
+                {TARGET_LANGUAGE_LABELS[language]}
+              </option>
+            ))}
+          </select>
+        </div>
+      </section>
 
       <section className="rounded-lg border border-border bg-muted/30 p-3">
         <div className="flex items-center justify-between">
