@@ -29,6 +29,7 @@ function ensureSelectionEl(): HTMLElement {
 
 function hideSelectionPlayer(): void {
   if (selectionEl) {
+    console.log("[GlossPlusOne:selection] Hiding selection player");
     selectionEl.style.display = "none";
   }
 }
@@ -56,6 +57,13 @@ function showSelectionPlayer(text: string, language: string, selection: Selectio
 
   const root = ensureSelectionEl();
   const displayText = text.length > 30 ? `${text.slice(0, 30)}…` : text;
+
+  console.log("[GlossPlusOne:selection] Showing selection player", {
+    text,
+    language,
+    displayText,
+    rangeCount: selection.rangeCount,
+  });
 
   root.innerHTML = `
     <div style="
@@ -102,8 +110,15 @@ function showSelectionPlayer(text: string, language: string, selection: Selectio
   const playButton = root.querySelector("#gloss-selection-play");
   const addButton = root.querySelector("#gloss-selection-add");
   if (!(playButton instanceof HTMLElement) || !(addButton instanceof HTMLElement)) {
+    console.warn("[GlossPlusOne:selection] Selection player buttons not found after render");
     return;
   }
+
+  playButton.addEventListener("mousedown", (event) => {
+    console.log("[GlossPlusOne:selection] Play button mousedown");
+    event.preventDefault();
+    event.stopPropagation();
+  });
 
   playButton.addEventListener("click", () => {
     const label = playButton.querySelector("span");
@@ -145,7 +160,19 @@ function showSelectionPlayer(text: string, language: string, selection: Selectio
     );
   });
 
+  addButton.addEventListener("mousedown", (event) => {
+    console.log("[GlossPlusOne:selection] Add button mousedown");
+    event.preventDefault();
+    event.stopPropagation();
+  });
+
   addButton.addEventListener("click", () => {
+    console.log("[GlossPlusOne:selection] Add phrase button clicked", {
+      text,
+      language,
+      sourceUrl: window.location.href,
+    });
+
     const addBtnEl = addButton as HTMLButtonElement;
     addBtnEl.disabled = true;
     addBtnEl.textContent = "...";
@@ -166,6 +193,10 @@ function showSelectionPlayer(text: string, language: string, selection: Selectio
         },
       },
       (response: { success: boolean; targetPhrase?: string } | undefined) => {
+        console.log("[GlossPlusOne:selection] Add phrase response received", {
+          response,
+          lastError: chrome.runtime.lastError?.message ?? null,
+        });
         clearTimeout(timeout);
         if (chrome.runtime.lastError) {
           console.error(
@@ -201,21 +232,37 @@ export function initSelectionPlayer(language: string): void {
     return;
   }
 
-  document.addEventListener("mouseup", () => {
+  document.addEventListener("mouseup", (event) => {
     if (!selectionPlayerEnabled) {
       hideSelectionPlayer();
+      return;
+    }
+
+    const target = event.target;
+    if (target instanceof Element && target.closest("#gloss-selection-player")) {
+      console.log("[GlossPlusOne:selection] Mouseup inside selection player, preserving popup");
       return;
     }
 
     const selection = window.getSelection();
     const text = selection?.toString().trim() ?? "";
 
+    console.log("[GlossPlusOne:selection] Document mouseup", {
+      text,
+      hasSelection: Boolean(selection),
+      rangeCount: selection?.rangeCount ?? 0,
+    });
+
     if (text.length < MIN_CHARS || text.length > MAX_CHARS) {
+      console.log("[GlossPlusOne:selection] Selection length outside bounds, hiding popup", {
+        length: text.length,
+      });
       hideSelectionPlayer();
       return;
     }
 
     if (!/[a-zA-Z\u00C0-\u017E]/.test(text) || !selection) {
+      console.log("[GlossPlusOne:selection] Selection missing letters or selection object, hiding popup");
       hideSelectionPlayer();
       return;
     }
@@ -231,9 +278,11 @@ export function initSelectionPlayer(language: string): void {
 
     const target = event.target;
     if (target instanceof Element && target.closest("#gloss-selection-player")) {
+      console.log("[GlossPlusOne:selection] Mousedown inside selection player");
       return;
     }
 
+    console.log("[GlossPlusOne:selection] Outside mousedown, hiding selection player");
     hideSelectionPlayer();
   });
 
