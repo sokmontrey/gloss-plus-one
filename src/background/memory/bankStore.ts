@@ -1,4 +1,9 @@
-import { BANK_KEY, getPhraseBankFromSnapshot, savePhraseBankToSnapshot } from "@/shared/phraseBankStorage";
+import {
+  BANK_KEY,
+  createEmptyPhraseBank,
+  getPhraseBankFromSnapshot,
+  savePhraseBankToSnapshot,
+} from "@/shared/phraseBankStorage";
 import type { BankPhrase, PhraseBank, PhraseBatch, ProgressionConfig } from "@/shared/types";
 const CONFIG_KEY = "glossProgressionConfig";
 const MIN_PROGRESS_PHRASES = 3;
@@ -64,6 +69,13 @@ export async function savePhraseBank(bank: PhraseBank): Promise<void> {
   const result = await chrome.storage.local.get(BANK_KEY);
   await chrome.storage.local.set({
     [BANK_KEY]: savePhraseBankToSnapshot(result[BANK_KEY], bank),
+  });
+}
+
+export async function resetPhraseBank(language: string): Promise<void> {
+  const result = await chrome.storage.local.get(BANK_KEY);
+  await chrome.storage.local.set({
+    [BANK_KEY]: savePhraseBankToSnapshot(result[BANK_KEY], createEmptyPhraseBank(language)),
   });
 }
 

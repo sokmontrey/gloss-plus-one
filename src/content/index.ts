@@ -1,5 +1,6 @@
 import { extractParagraphs } from "./reader/parser";
 import { enrichPageContent } from "./reader/enricher";
+import { resolveDomPath } from "./reader/domPath";
 import { applyOutputAndAnimate, clearOutput, injectOutputStyles } from "./output";
 import { initHoverListeners } from "./overlay/tooltipManager";
 import { initSelectionPlayer } from "./overlay/selectionPlayer";
@@ -131,7 +132,6 @@ function renderFromBank(bank: BankPhrase[]): void {
     return;
   }
 
-  clearOutput(document);
   const instructions = buildInstructions(paragraphs, bank);
 
   console.log(
@@ -148,6 +148,16 @@ function renderFromBank(bank: BankPhrase[]): void {
       paragraphs[0]?.text?.slice(0, 80),
     );
     return;
+  }
+
+  // Only rerender paragraphs that actually have matches. This avoids the
+  // whole-page flash back to source text when new phrases are discovered.
+  const affectedDomPaths = new Set(instructions.map((instruction) => instruction.domPath));
+  for (const domPath of affectedDomPaths) {
+    const element = resolveDomPath(domPath);
+    if (element) {
+      clearOutput(element);
+    }
   }
 
   applyOutputAndAnimate(instructions);

@@ -97,6 +97,13 @@ export interface UpdateProgressionConfigMessage {
   payload: Partial<ProgressionConfig>;
 }
 
+export interface ResetLanguageDataMessage {
+  type: "RESET_LANGUAGE_DATA";
+  payload: {
+    language: string;
+  };
+}
+
 export interface RequestAudioMessage {
   type: "REQUEST_AUDIO";
   payload: {
@@ -154,6 +161,7 @@ export type ContentToBackgroundMessage =
   | RunPageDiscoveryMessage
   | FetchDefinitionMessage
   | UpdateProgressionConfigMessage
+  | ResetLanguageDataMessage
   | RequestAudioMessage
   | ReportPageSignalMessage
   | AddPhraseToBankMessage;

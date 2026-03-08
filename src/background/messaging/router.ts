@@ -14,6 +14,7 @@ import {
   getPhraseBank,
   recordExposure,
   recordHoverDecay,
+  resetPhraseBank,
   saveProgressionConfig,
   savePhraseBank,
 } from "@/background/memory/bankStore";
@@ -100,7 +101,7 @@ export async function routeBackgroundMessage(
       const consumed = await consumeProgressionTrigger(language);
       if (consumed) {
         console.log("[GlossPlusOne:router] Progression triggered after exposure");
-        await clearProcessedUrls();
+        await clearProcessedUrls(language);
         void runPlanner("progression", language);
       }
       break;
@@ -117,7 +118,7 @@ export async function routeBackgroundMessage(
       const consumed = await consumeProgressionTrigger(language);
       if (consumed) {
         console.log("[GlossPlusOne:router] Progression triggered");
-        await clearProcessedUrls();
+        await clearProcessedUrls(language);
         void runPlanner("progression", language);
       }
       break;
@@ -126,7 +127,7 @@ export async function routeBackgroundMessage(
     case "TRIGGER_PLANNER": {
       const { reason, language } = message.payload;
       if (reason === "progression" || reason === "debug_increment") {
-        await clearProcessedUrls();
+        await clearProcessedUrls(language);
       }
       void runPlanner(reason, language);
       break;
@@ -136,6 +137,16 @@ export async function routeBackgroundMessage(
       const { language } = message.payload as { language: string };
       const userContext = await getUserContext();
       void ensureStructuralTranslations(language, userContext.nativeLanguage);
+      break;
+    }
+
+    case "RESET_LANGUAGE_DATA": {
+      const { language } = message.payload as { language: string };
+      await Promise.all([
+        resetPhraseBank(language),
+        clearProcessedUrls(language),
+      ]);
+      console.log(`[GlossPlusOne:router] Reset language data for ${language}`);
       break;
     }
 

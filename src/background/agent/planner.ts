@@ -18,21 +18,151 @@ function normalizePhraseKey(value: string): string {
   return normalizePhrase(value).toLowerCase();
 }
 
+function replaceSingleQuotedStrings(value: string): string {
+  return value.replace(/'([^'\\]*(?:\\.[^'\\]*)*)'/g, (_match, inner: string) => JSON.stringify(inner));
+}
+
+function escapeNewlinesInStrings(value: string): string {
+  let result = "";
+  let inString = false;
+  let quoteChar = '"';
+
+  for (let index = 0; index < value.length; index += 1) {
+    const char = value[index];
+    const prev = value[index - 1];
+
+    if (!inString) {
+      if ((char === '"' || char === "'") && prev !== "\\") {
+        inString = true;
+        quoteChar = char;
+      }
+      result += char;
+      continue;
+    }
+
+    if (char === quoteChar && prev !== "\\") {
+      inString = false;
+      result += char;
+      continue;
+    }
+
+    if (char === "\n") {
+      result += "\\n";
+      continue;
+    }
+
+    if (char === "\r") {
+      result += "\\r";
+      continue;
+    }
+
+    result += char;
+  }
+
+  return result;
+}
+
+function repairLikelyJson(value: string): string {
+  return escapeNewlinesInStrings(
+    replaceSingleQuotedStrings(value)
+      .replace(/[“”]/g, '"')
+      .replace(/[‘’]/g, "'")
+      .replace(/([{,]\s*)([A-Za-z_][A-Za-z0-9_]*)(\s*:)/g, '$1"$2"$3')
+      .replace(/,(\s*[}\]])/g, "$1"),
+  );
+}
+
+function extractObjectsFromArray(value: string): string[] {
+  const objects: string[] = [];
+  let start = -1;
+  let depth = 0;
+  let inString: string | null = null;
+
+  for (let index = 0; index < value.length; index += 1) {
+    const char = value[index];
+    const prev = value[index - 1];
+
+    if (inString !== null) {
+      if (char === inString && prev !== "\\") {
+        inString = null;
+      }
+      continue;
+    }
+
+    if (char === '"' || char === "'") {
+      inString = char;
+      continue;
+    }
+
+    if (char === "{") {
+      if (depth === 0) {
+        start = index;
+      }
+      depth += 1;
+      continue;
+    }
+
+    if (char === "}") {
+      depth -= 1;
+      if (depth === 0 && start !== -1) {
+        objects.push(value.slice(start, index + 1));
+        start = -1;
+      }
+    }
+  }
+
+  return objects;
+}
+
+/** Extract the first complete JSON array or object by bracket matching (avoids cutting inside string values). */
 function extractJsonPayload(raw: string): string {
   const clean = raw.replace(/```json\s*/gi, "").replace(/```\s*/g, "").trim();
-  const firstArrayIndex = clean.indexOf("[");
-  const lastArrayIndex = clean.lastIndexOf("]");
-  if (firstArrayIndex !== -1 && lastArrayIndex > firstArrayIndex) {
-    return clean.slice(firstArrayIndex, lastArrayIndex + 1);
+  const firstBracket = clean.indexOf("[");
+  const firstBrace = clean.indexOf("{");
+  const isArray = firstBracket !== -1 && (firstBrace === -1 || firstBracket < firstBrace);
+  const open = isArray ? "[" : "{";
+  const close = isArray ? "]" : "}";
+  const start = isArray ? firstBracket : firstBrace;
+  if (start === -1) {
+    return clean;
   }
-
-  const firstObjectIndex = clean.indexOf("{");
-  const lastObjectIndex = clean.lastIndexOf("}");
-  if (firstObjectIndex !== -1 && lastObjectIndex > firstObjectIndex) {
-    return clean.slice(firstObjectIndex, lastObjectIndex + 1);
+  let depth = 0;
+  let inString: string | null = null;
+  let i = start;
+  while (i < clean.length) {
+    const c = clean[i];
+    if (inString !== null) {
+      if (c === "\\" && i + 1 < clean.length) {
+        i += 2;
+        continue;
+      }
+      if (c === inString) {
+        inString = null;
+      }
+      i += 1;
+      continue;
+    }
+    if (c === '"' || c === "'") {
+      inString = c;
+      i += 1;
+      continue;
+    }
+    if (c === open) {
+      depth += 1;
+      i += 1;
+      continue;
+    }
+    if (c === close) {
+      depth -= 1;
+      if (depth === 0) {
+        return clean.slice(start, i + 1);
+      }
+      i += 1;
+      continue;
+    }
+    i += 1;
   }
-
-  return clean;
+  return clean.slice(start);
 }
 
 function getTierCefrBand(tier: number, fallback: UserContext["cefrBand"]): UserContext["cefrBand"] {
@@ -84,22 +214,49 @@ export async function runPlanner(triggerReason: TriggerPlannerReason, language: 
 
 export function parseJsonResponse(raw: string): unknown {
   const clean = extractJsonPayload(raw);
+  const candidates = [clean, repairLikelyJson(clean)];
 
-  if (clean.startsWith("{")) {
-    const obj = JSON.parse(clean) as Record<string, unknown>;
-    const arr =
-      obj.phrases ??
-      obj.replacements ??
-      obj.data ??
-      obj.result ??
-      obj.items ??
-      Object.values(obj).find((value) => Array.isArray(value));
-    if (Array.isArray(arr)) {
-      return arr;
+  let lastError: unknown = null;
+  for (const candidate of candidates) {
+    try {
+      if (candidate.startsWith("{")) {
+        const obj = JSON.parse(candidate) as Record<string, unknown>;
+        const arr =
+          obj.phrases ??
+          obj.replacements ??
+          obj.data ??
+          obj.result ??
+          obj.items ??
+          Object.values(obj).find((value) => Array.isArray(value));
+        if (Array.isArray(arr)) {
+          return arr;
+        }
+      }
+
+      return JSON.parse(candidate);
+    } catch (error) {
+      lastError = error;
     }
   }
 
-  return JSON.parse(clean);
+  const repaired = repairLikelyJson(clean);
+  if (repaired.startsWith("[")) {
+    const objects = extractObjectsFromArray(repaired);
+    if (objects.length > 0) {
+      const parsed = objects.flatMap((item) => {
+        try {
+          return [JSON.parse(repairLikelyJson(item)) as Record<string, unknown>];
+        } catch {
+          return [];
+        }
+      });
+      if (parsed.length > 0) {
+        return parsed;
+      }
+    }
+  }
+
+  throw lastError instanceof Error ? lastError : new Error("PLANNER_JSON_PARSE_FAILED");
 }
 
 export async function ensureStructuralTranslations(
@@ -193,19 +350,31 @@ Return a JSON array and nothing else. No markdown. Start with [.
   }
 }
 
-async function getProcessedUrls(): Promise<Set<string>> {
-  const result = await chrome.storage.local.get(PROCESSED_URLS_KEY);
-  return new Set((result[PROCESSED_URLS_KEY] as string[] | undefined) ?? []);
+function getProcessedUrlStorageKey(language: string): string {
+  return `${PROCESSED_URLS_KEY}:${language}`;
 }
 
-async function markUrlProcessed(urlHash: string): Promise<void> {
-  const existing = await getProcessedUrls();
+async function getProcessedUrls(language: string): Promise<Set<string>> {
+  const storageKey = getProcessedUrlStorageKey(language);
+  const result = await chrome.storage.local.get(PROCESSED_URLS_KEY);
+  const legacy = result[PROCESSED_URLS_KEY] as string[] | undefined;
+  const next = await chrome.storage.local.get(storageKey);
+  return new Set((next[storageKey] as string[] | undefined) ?? legacy ?? []);
+}
+
+async function markUrlProcessed(language: string, urlHash: string): Promise<void> {
+  const storageKey = getProcessedUrlStorageKey(language);
+  const existing = await getProcessedUrls(language);
   existing.add(urlHash);
   const trimmed = [...existing].slice(-MAX_DISCOVERY_URLS);
-  await chrome.storage.local.set({ [PROCESSED_URLS_KEY]: trimmed });
+  await chrome.storage.local.set({ [storageKey]: trimmed });
 }
 
-export async function clearProcessedUrls(): Promise<void> {
+export async function clearProcessedUrls(language?: string): Promise<void> {
+  if (language) {
+    await chrome.storage.local.set({ [getProcessedUrlStorageKey(language)]: [] });
+    return;
+  }
   await chrome.storage.local.set({ [PROCESSED_URLS_KEY]: [] });
 }
 
@@ -221,6 +390,21 @@ function hashUrl(url: string): string {
   }
 }
 
+function hashPageContent(pageText: string): string {
+  const normalized = pageText
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 800);
+
+  let hash = 0;
+  for (let index = 0; index < normalized.length; index += 1) {
+    hash = (hash * 31 + normalized.charCodeAt(index)) >>> 0;
+  }
+
+  return hash.toString(36);
+}
+
 export async function runPageDiscovery(
   pageText: string,
   pageTitle: string,
@@ -228,9 +412,11 @@ export async function runPageDiscovery(
   language: string,
 ): Promise<void> {
   const urlHash = hashUrl(pageUrl);
-  const processed = await getProcessedUrls();
-  if (processed.has(urlHash)) {
-    console.log("[GlossPlusOne:planner] URL already processed, skipping");
+  const contentHash = hashPageContent(pageText);
+  const processedKey = `${urlHash}::${contentHash}`;
+  const processed = await getProcessedUrls(language);
+  if (processed.has(processedKey)) {
+    console.log("[GlossPlusOne:planner] URL + content already processed, skipping");
     return;
   }
 
@@ -241,11 +427,13 @@ export async function runPageDiscovery(
   const existingPhrases = bank.phrases.map((phrase) => normalizePhraseKey(phrase.phrase));
   const existingSet = new Set(existingPhrases);
   const effectiveBand = getTierCefrBand(bank.currentTier, userContext.cefrBand);
+  const nextBand = getTierCefrBand(Math.min(bank.currentTier + 1, MAX_TIER), userContext.cefrBand);
 
   const prompt = `You are a language teacher selecting vocabulary for a ${userContext.cefrBand} learner.
 Native language: ${userContext.nativeLanguage}
 Target language: ${language}
 Current discovery tier: ${bank.currentTier} (${effectiveBand})
+Target difficulty for new discoveries: approximately i+1 (${nextBand})
 
 Page title: "${pageTitle}"
 Page content excerpt:
@@ -255,10 +443,19 @@ Phrases already in the learner's bank (DO NOT repeat these):
 ${existingPhrases.slice(-40).map((phrase) => `"${phrase}"`).join(", ")}
 
 Select 5-8 phrases from this specific page content that are:
-- Worth learning at about ${effectiveBand} level
+- Worth learning at approximately one step above the current bank (${nextBand})
 - Actually present in the text above (or close variants)
 - Not already in the bank list above
 - 1-5 words each
+
+Prioritize in this order:
+1. Structural phrases and grammar chunks that support comprehension and feel like Krashen i+1
+2. High-frequency discourse connectors, clause frames, modal/purpose/cause phrases
+3. Lexical phrases only when the excerpt does not contain enough good structural candidates
+
+Avoid random niche vocabulary, proper nouns, fragmented text, or phrases that are much harder than ${nextBand}.
+Prefer phrases that make sense as the learner's next step from the current bank.
+If possible, return mostly structural phrases and mark them with "phraseType": "structural".
 
 Return a JSON array and nothing else. Start with [.
 [
@@ -279,7 +476,7 @@ Return a JSON array and nothing else. Start with [.
 
     if (!Array.isArray(parsed) || parsed.length === 0) {
       console.warn("[GlossPlusOne:planner] Page discovery returned empty");
-      await markUrlProcessed(urlHash);
+      await markUrlProcessed(language, processedKey);
       return;
     }
 
@@ -318,7 +515,7 @@ Return a JSON array and nothing else. Start with [.
 
     if (newPhrases.length === 0) {
       console.warn("[GlossPlusOne:planner] Page discovery returned only duplicates");
-      await markUrlProcessed(urlHash);
+      await markUrlProcessed(language, processedKey);
       return;
     }
 
@@ -334,14 +531,14 @@ Return a JSON array and nothing else. Start with [.
       plannerContext: `Page discovery for ${pageTitle.slice(0, 80)}`,
     });
     await savePhraseBank(bank);
-    await markUrlProcessed(urlHash);
+    await markUrlProcessed(language, processedKey);
 
     console.log(
       `[GlossPlusOne:planner] Page discovery added ${newPhrases.length} phrases`,
     );
   } catch (err) {
     console.error("[GlossPlusOne:planner] Page discovery failed:", err);
-    await markUrlProcessed(urlHash);
+    await markUrlProcessed(language, processedKey);
   }
 }
 

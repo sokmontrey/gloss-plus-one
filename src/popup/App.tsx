@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { ExternalLink, Minus, Plus } from "lucide-react";
+import { ExternalLink, Minus, Plus, RotateCcw } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { SUPPORTED_TARGET_LANGUAGES, TARGET_LANGUAGE_LABELS } from "@/shared/languages";
@@ -164,6 +164,7 @@ export default function App() {
     profile: null,
   });
   const [isPlanning, setIsPlanning] = useState(false);
+  const [showResetConfirm, setShowResetConfirm] = useState(false);
   const [pageControl, setPageControl] = useState<PageControlState>({
     status: "loading",
     url: null,
@@ -334,6 +335,26 @@ export default function App() {
     }
   };
 
+  const handleResetLanguageConfirm = async () => {
+    const language = state.targetLanguage;
+    setShowResetConfirm(false);
+
+    await chrome.runtime.sendMessage({
+      type: "RESET_LANGUAGE_DATA",
+      payload: { language },
+    });
+
+    setState((current) => ({
+      ...current,
+      bank: createEmptyPhraseBank(language),
+    }));
+
+    chrome.runtime.sendMessage({
+      type: "ENSURE_STRUCTURAL_TRANSLATIONS",
+      payload: { language },
+    });
+  };
+
   return (
     <main className="flex min-w-[320px] flex-col gap-4 bg-background p-4 text-foreground">
       <div className="space-y-1">
@@ -445,6 +466,41 @@ export default function App() {
             <span className="truncate">{isPlanning ? "Advancing..." : "Next stage"}</span>
           </Button>
         </div>
+        {showResetConfirm ? (
+          <div className="mt-2 flex min-w-0 flex-col gap-2 rounded-md border border-rose-200 bg-rose-50/50 p-2 dark:border-rose-800 dark:bg-rose-950/30">
+            <p className="text-xs text-rose-800 dark:text-rose-200">
+              Reset all phrase bank and progression for {state.targetLanguage.toUpperCase()}?
+            </p>
+            <div className="flex min-w-0 gap-2">
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => setShowResetConfirm(false)}
+                className="min-w-0 flex-1 shrink"
+              >
+                Cancel
+              </Button>
+              <Button
+                size="sm"
+                variant="destructive"
+                onClick={() => void handleResetLanguageConfirm()}
+                className="min-w-0 flex-1 shrink"
+              >
+                Reset
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => setShowResetConfirm(true)}
+            className="mt-2 w-full min-w-0 justify-center gap-2 text-rose-700"
+          >
+            <RotateCcw className="h-3.5 w-3.5 shrink-0" />
+            <span className="truncate">Reset This Language</span>
+          </Button>
+        )}
         <p className="mt-2 text-[11px] text-muted-foreground">
           New discovery phrases raise this bar. High average confidence unlocks harder vocabulary.
         </p>
