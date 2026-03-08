@@ -13,7 +13,8 @@ chrome.runtime.onMessage.addListener(
     return (
       message.type === "GET_BANK" ||
       message.type === "FETCH_DEFINITION" ||
-      message.type === "REQUEST_AUDIO"
+      message.type === "REQUEST_AUDIO" ||
+      message.type === "ADD_PHRASE_TO_BANK"
     );
   },
 );

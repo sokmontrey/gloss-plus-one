@@ -2,10 +2,11 @@ import { useEffect, useMemo, useState } from "react";
 import { ExternalLink, Minus, Plus } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import type { PhraseBank, ProgressionConfig, UserContext } from "@/shared/types";
+import type { PhraseBank, ProgressionConfig, UserContext, UserInterestProfile } from "@/shared/types";
 
 const BANK_KEY = "glossPhraseBank";
 const CONFIG_KEY = "glossProgressionConfig";
+const INTEREST_KEY = "glossInterestProfile";
 const USER_CONTEXT_KEY = "userContext";
 const PROGRESSION_STEPS = [0.4, 0.55, 0.7, 0.82, 0.92] as const;
 
@@ -20,6 +21,7 @@ interface PopupState {
   bank: PhraseBank | null;
   config: ProgressionConfig;
   targetLanguage: string;
+  profile: UserInterestProfile | null;
 }
 
 function thresholdToSliderValue(threshold: number): number {
@@ -44,8 +46,10 @@ export default function App() {
     bank: null,
     config: DEFAULT_CONFIG,
     targetLanguage: "es",
+    profile: null,
   });
   const [plannerQueued, setPlannerQueued] = useState(false);
+  const [profileExpanded, setProfileExpanded] = useState(false);
 
   const sliderValue = useMemo(
     () => thresholdToSliderValue(state.config.progressionThreshold),
@@ -54,7 +58,7 @@ export default function App() {
 
   useEffect(() => {
     const refresh = async () => {
-      const result = await chrome.storage.local.get([BANK_KEY, CONFIG_KEY, USER_CONTEXT_KEY]);
+      const result = await chrome.storage.local.get([BANK_KEY, CONFIG_KEY, INTEREST_KEY, USER_CONTEXT_KEY]);
       const userContext = result[USER_CONTEXT_KEY] as Partial<UserContext> | undefined;
       setState({
         bank: (result[BANK_KEY] as PhraseBank | undefined) ?? null,
@@ -63,13 +67,17 @@ export default function App() {
           ...(result[CONFIG_KEY] as Partial<ProgressionConfig> | undefined),
         },
         targetLanguage: userContext?.targetLanguage ?? "es",
+        profile: (result[INTEREST_KEY] as UserInterestProfile | undefined) ?? null,
       });
       setPlannerQueued(false);
     };
 
     void refresh();
     const listener = (changes: { [key: string]: chrome.storage.StorageChange }, area: string) => {
-      if (area === "local" && (changes[BANK_KEY] || changes[CONFIG_KEY] || changes[USER_CONTEXT_KEY])) {
+      if (
+        area === "local" &&
+        (changes[BANK_KEY] || changes[CONFIG_KEY] || changes[INTEREST_KEY] || changes[USER_CONTEXT_KEY])
+      ) {
         void refresh();
       }
     };
@@ -153,6 +161,33 @@ export default function App() {
           className="mt-3 h-2 w-full accent-primary"
         />
       </section>
+
+      {state.profile && state.profile.topTopics.length > 0 ? (
+        <section className="rounded-lg border border-border bg-muted/30 p-3">
+          <button
+            type="button"
+            onClick={() => setProfileExpanded((current) => !current)}
+            className="flex w-full items-center justify-between text-left"
+          >
+            <span className="text-xs font-medium">Reading profile</span>
+            <span className="text-[11px] text-muted-foreground">
+              {profileExpanded ? "Hide" : "Show"}
+            </span>
+          </button>
+          {profileExpanded ? (
+            <div className="mt-2 flex flex-wrap gap-1">
+              {state.profile.topTopics.slice(0, 5).map((topic) => (
+                <span
+                  key={topic}
+                  className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-xs text-amber-700"
+                >
+                  {topic}
+                </span>
+              ))}
+            </div>
+          ) : null}
+        </section>
+      ) : null}
 
       <Button size="sm" variant="outline" onClick={openDashboard} className="w-full justify-center gap-2">
         <ExternalLink className="h-3.5 w-3.5" />

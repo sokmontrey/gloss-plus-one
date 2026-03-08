@@ -1,7 +1,7 @@
 import { isPlaying, playAudio, requestAndPlay } from "./audioPlayer";
 
 const MIN_CHARS = 2;
-const MAX_CHARS = 200;
+const MAX_CHARS = 60;
 
 let selectionEl: HTMLElement | null = null;
 let currentLanguage = "es";
@@ -49,26 +49,36 @@ function showSelectionPlayer(text: string, language: string, selection: Selectio
   const displayText = text.length > 30 ? `${text.slice(0, 30)}…` : text;
 
   root.innerHTML = `
-    <button
-      id="gloss-selection-btn"
-      style="
-        display: inline-flex;
-        align-items: center;
-        gap: 6px;
-        padding: 5px 12px;
-        background: #1f2937;
-        color: white;
-        border: none;
-        border-radius: 20px;
-        font-size: 12px;
-        font-family: system-ui;
-        cursor: pointer;
+    <div style="
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      background: #1f2937;
+      border-radius: 20px;
+      padding: 3px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.25);
+    ">
+      <button id="gloss-selection-play" style="
+        display: inline-flex; align-items: center; gap: 5px;
+        padding: 4px 10px; background: transparent; color: white;
+        border: none; border-radius: 16px; font-size: 12px;
+        font-family: system-ui; cursor: pointer;
+      ">
+        🔊
+        <span style="opacity:0.8;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
+          ${escapeHtml(displayText)}
+        </span>
+      </button>
+      <button id="gloss-selection-add" style="
+        display: inline-flex; align-items: center; gap: 4px;
+        padding: 4px 10px; background: rgba(251,191,36,0.2);
+        color: rgba(251,191,36,1); border: none; border-radius: 16px;
+        font-size: 12px; font-family: system-ui; cursor: pointer;
         white-space: nowrap;
-        box-shadow: 0 2px 8px rgba(0,0,0,0.25);
-      "
-    >
-      🔊 <span style="opacity:0.7;max-width:160px;overflow:hidden;text-overflow:ellipsis">${escapeHtml(displayText)}</span>
-    </button>
+      ">
+        + Learn
+      </button>
+    </div>
   `;
 
   root.style.cssText = `
@@ -80,13 +90,14 @@ function showSelectionPlayer(text: string, language: string, selection: Selectio
     display: block;
   `;
 
-  const button = root.querySelector("#gloss-selection-btn");
-  if (!(button instanceof HTMLElement)) {
+  const playButton = root.querySelector("#gloss-selection-play");
+  const addButton = root.querySelector("#gloss-selection-add");
+  if (!(playButton instanceof HTMLElement) || !(addButton instanceof HTMLElement)) {
     return;
   }
 
-  button.addEventListener("click", () => {
-    const label = button.querySelector("span");
+  playButton.addEventListener("click", () => {
+    const label = playButton.querySelector("span");
     if (isPlaying(text)) {
       playAudio("", "");
       hideSelectionPlayer();
@@ -96,14 +107,14 @@ function showSelectionPlayer(text: string, language: string, selection: Selectio
     if (label instanceof HTMLElement) {
       label.textContent = "...";
     }
-    button.style.background = "#92400e";
+    playButton.style.background = "#92400e";
 
     void requestAndPlay(
       text,
       language,
       undefined,
       () => {
-        const nextLabel = button.querySelector("span");
+        const nextLabel = playButton.querySelector("span");
         if (nextLabel instanceof HTMLElement) {
           nextLabel.textContent = `⏹ ${displayText}`;
         }
@@ -111,6 +122,37 @@ function showSelectionPlayer(text: string, language: string, selection: Selectio
     ).catch(() => {
       hideSelectionPlayer();
     });
+  });
+
+  addButton.addEventListener("click", () => {
+    addButton.textContent = "...";
+    addButton.style.opacity = "0.6";
+
+    chrome.runtime.sendMessage(
+      {
+        type: "ADD_PHRASE_TO_BANK",
+        payload: {
+          phrase: text,
+          language,
+          sourceUrl: window.location.href,
+          sourceTitle: document.title,
+        },
+      },
+      (response?: { success?: boolean; targetPhrase?: string }) => {
+        if (response?.success) {
+          addButton.textContent = `✓ ${response.targetPhrase ?? "added"}`;
+          addButton.style.color = "rgba(251,191,36,1)";
+          addButton.style.opacity = "1";
+          window.setTimeout(() => {
+            hideSelectionPlayer();
+          }, 1500);
+          return;
+        }
+
+        addButton.textContent = "failed";
+        addButton.style.opacity = "1";
+      },
+    );
   });
 }
 

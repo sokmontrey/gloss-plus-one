@@ -1,9 +1,10 @@
 import { callGemini } from "../api/gemini";
 import { callGroq } from "../api/groq";
 import { getPhraseBank, removeLastBatch, savePhraseBank } from "../memory/bankStore";
+import { getInterestProfile } from "../memory/pageSignalStore";
 import { getUserContext } from "../memory/store";
 import type { TriggerPlannerReason } from "@/shared/messages";
-import type { BankPhrase, PhraseBank, UserContext } from "@/shared/types";
+import type { BankPhrase, PhraseBank, UserContext, UserInterestProfile } from "@/shared/types";
 
 interface RawPlannerPhrase {
   phrase: string;
@@ -48,10 +49,22 @@ export async function runPlanner(triggerReason: TriggerPlannerReason, language: 
     return;
   }
 
-  const [bank, userContext] = await Promise.all([getPhraseBank(language), getUserContext()]);
+  const [bank, userContext, interestProfile] = await Promise.all([
+    getPhraseBank(language),
+    getUserContext(),
+    getInterestProfile(),
+  ]);
   const batchId = crypto.randomUUID();
   const nextTier = triggerReason === "initial" ? 1 : bank.currentTier + 1;
-  const newPhrases = await generatePhraseBatch(bank, userContext, nextTier, batchId, triggerReason, language);
+  const newPhrases = await generatePhraseBatch(
+    bank,
+    userContext,
+    interestProfile,
+    nextTier,
+    batchId,
+    triggerReason,
+    language,
+  );
 
   if (newPhrases.length === 0) {
     console.warn("[GlossPlusOne:planner] Planner returned empty batch");
@@ -80,6 +93,7 @@ export async function runPlanner(triggerReason: TriggerPlannerReason, language: 
 async function generatePhraseBatch(
   bank: PhraseBank,
   userContext: UserContext,
+  interestProfile: UserInterestProfile,
   tier: number,
   batchId: string,
   triggerReason: TriggerPlannerReason,
@@ -89,10 +103,17 @@ async function generatePhraseBatch(
   const existingSet = new Set(existingPhrases);
   const prompt =
     tier >= 4
-      ? buildExplorationPrompt(userContext, existingPhrases, language, tier)
-      : buildStructuralPrompt(userContext, existingPhrases, language, tier);
+      ? buildExplorationPrompt(userContext, interestProfile, existingPhrases, language, tier)
+      : buildStructuralPrompt(userContext, interestProfile, existingPhrases, language, tier);
 
-  console.log(`[GlossPlusOne:planner] Generating tier ${tier} batch for ${language} (${triggerReason})`);
+  console.log(
+    `[GlossPlusOne:planner] Generating tier ${tier} batch for ${language} (${triggerReason})`,
+    {
+      topTopics: interestProfile.topTopics.slice(0, 3),
+      topDomains: interestProfile.topDomains.slice(0, 3),
+      recentTopics: interestProfile.recentTopics.slice(0, 3),
+    },
+  );
 
   try {
     const raw = await callPlannerLLM(prompt);
@@ -139,17 +160,33 @@ function parsePlannerResponse(raw: string): RawPlannerPhrase[] {
 
 function buildStructuralPrompt(
   userContext: UserContext,
+  interestProfile: UserInterestProfile,
   existing: string[],
   language: string,
   tier: number,
 ): string {
   const tierLabel = ["", "A1", "A2", "B1", "B2", "C1", "C2"][tier] ?? "B1";
+  const readingContext =
+    interestProfile.topTopics.length > 0
+      ? `
+USER READING CONTEXT:
+This learner regularly reads about: ${interestProfile.topTopics.join(", ")}
+Recent topics: ${interestProfile.recentTopics.join(", ")}
+Frequent domains: ${interestProfile.topDomains.join(", ")}
+
+When multiple phrase options are equally appropriate for tier ${tierLabel},
+PREFER phrases that appear naturally in ${interestProfile.topTopics[0] ?? "general"}
+content. For example, if they read tech articles, prefer "as a result"
+over "in the garden" as a context for grammar demonstration.
+`
+      : "";
 
   return `
 You are building a language acquisition phrase bank for a learner.
 Native language: ${userContext.nativeLanguage}
 Target language: ${language}
 Current tier: ${tierLabel}
+${readingContext}
 
 ALREADY IN BANK (do NOT include these):
 ${existing.length > 0 ? existing.map((phrase) => `  "${phrase}"`).join("\n") : "  none yet"}
@@ -179,6 +216,7 @@ Return ONLY valid JSON array, no markdown, no explanation:
 
 function buildExplorationPrompt(
   userContext: UserContext,
+  interestProfile: UserInterestProfile,
   existing: string[],
   language: string,
   tier: number,
@@ -202,6 +240,15 @@ register markers, sophisticated connectors.
 
 Consider common reading domains: news, technology, culture, opinion pieces.
 
+USER INTERESTS (use these to select relevant vocabulary):
+Primary topics: ${interestProfile.topTopics.slice(0, 3).join(", ") || "general"}
+Recent reading: ${interestProfile.recentTopics.join(", ") || "varied"}
+
+Generate lexical phrases that would appear in content about these topics.
+A tech reader should learn "open source", "deployment pipeline",
+"machine learning" vocabulary - not cooking or sports terms.
+Match vocabulary domain to the user's actual reading habits.
+
 Rules:
 - Phrases must be 1-5 words
 - Must be phrases the learner hasn't seen yet
@@ -217,4 +264,29 @@ Return ONLY valid JSON array, no markdown:
     "pedagogicalNote": "verb-noun collocation common in news"
   }
 ]`;
+}
+
+export async function extractPageTopic(
+  title: string,
+  domain: string,
+  pageType: string,
+): Promise<string | null> {
+  if (pageType === "unknown" || !title || title.length < 5) {
+    return null;
+  }
+
+  const prompt = `Article title: "${title}"
+Domain: ${domain}
+Reply with ONLY a topic label, 3 words maximum, no punctuation.
+Examples: "machine learning inference", "Canadian federal election",
+"personal finance tips", "web development tools"
+Topic:`;
+
+  try {
+    const raw = await callPlannerLLM(prompt, "text/plain");
+    const topic = raw.trim().replace(/[^\w\s]/g, "").slice(0, 40).trim();
+    return topic || null;
+  } catch {
+    return null;
+  }
 }

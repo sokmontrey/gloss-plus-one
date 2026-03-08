@@ -88,6 +88,27 @@ export interface AudioReadyMessage {
   };
 }
 
+export interface ReportPageSignalMessage {
+  type: "REPORT_PAGE_SIGNAL";
+  payload: {
+    url: string;
+    title: string;
+    domain: string;
+    pageType: string;
+    replacementCount: number;
+  };
+}
+
+export interface AddPhraseToBankMessage {
+  type: "ADD_PHRASE_TO_BANK";
+  payload: {
+    phrase: string;
+    language: string;
+    sourceUrl: string;
+    sourceTitle: string;
+  };
+}
+
 export type ContentToBackgroundMessage =
   | GetBankMessage
   | RecordExposureMessage
@@ -96,7 +117,9 @@ export type ContentToBackgroundMessage =
   | TriggerPlannerMessage
   | FetchDefinitionMessage
   | UpdateProgressionConfigMessage
-  | RequestAudioMessage;
+  | RequestAudioMessage
+  | ReportPageSignalMessage
+  | AddPhraseToBankMessage;
 
 /** Single replacement target: one phrase within a paragraph identified by domPath. */
 export interface ReplacementInstruction {

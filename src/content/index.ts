@@ -22,6 +22,7 @@ let plannerRequested = false;
 let hoverInitialized = false;
 let selectionInitialized = false;
 let initializingBadge: HTMLElement | null = null;
+let latestPageContext: Pick<PageContent, "url" | "title" | "domain" | "pageType"> | null = null;
 
 const USER_CONTEXT_KEY = "userContext";
 const CONFIG_KEY = "glossProgressionConfig";
@@ -174,6 +175,12 @@ function extractVisibleParagraphs(): SerializableParagraph[] {
   const run = metrics.start("delta");
   const content = withReadOnlyDomGuard(() => enrichPageContent(document));
   metrics.end(run);
+  latestPageContext = {
+    url: content.url,
+    title: content.title,
+    domain: content.domain,
+    pageType: content.pageType,
+  };
 
   const visibleParagraphs = content.paragraphs
     .map(serializeParagraph)
@@ -219,6 +226,25 @@ async function applyBankToVisibleParagraphs(): Promise<void> {
 
   if (instructions.length > 0) {
     applyOutputAndAnimate(instructions);
+
+    const pageContext = latestPageContext ?? {
+      url: window.location.href,
+      title: document.title,
+      domain: window.location.hostname,
+      pageType: "unknown" as PageContent["pageType"],
+    };
+
+    void chrome.runtime.sendMessage({
+      type: "REPORT_PAGE_SIGNAL",
+      payload: {
+        url: pageContext.url,
+        title: pageContext.title,
+        domain: pageContext.domain,
+        pageType: pageContext.pageType,
+        replacementCount: instructions.length,
+      },
+    });
+
     for (const instruction of instructions) {
       void chrome.runtime.sendMessage({
         type: "RECORD_EXPOSURE",

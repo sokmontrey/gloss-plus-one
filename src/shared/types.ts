@@ -45,7 +45,7 @@ export interface PhraseBatch {
   id: string;
   addedAt: number;
   tier: number;
-  triggerReason: "initial" | "progression" | "debug_increment" | "debug_decrement";
+  triggerReason: "initial" | "progression" | "debug_increment" | "debug_decrement" | "manual";
   phraseCount: number;
   plannerContext: string;
 }
@@ -64,6 +64,36 @@ export interface ProgressionConfig {
   confidenceGainPerExposure: number;
   confidenceDecayPerHover: number;
   hoverDecayThresholdMs: number;
+}
+
+export interface PageSignal {
+  id: string;
+  url: string;
+  title: string;
+  domain: string;
+  pageType: string;
+  topic: string | null;
+  replacementCount: number;
+  visitedAt: number;
+}
+
+export interface UserInterestProfile {
+  topTopics: string[];
+  topDomains: string[];
+  recentTopics: string[];
+  lastUpdatedAt: number;
+}
+
+export interface ManualBankEntry {
+  id: string;
+  phrase: string;
+  targetPhrase: string;
+  targetLanguage: string;
+  nativeLanguage: string;
+  sourceUrl: string;
+  sourceTitle: string;
+  addedAt: number;
+  userSelected: true;
 }
 
 export interface PlannedReplacement {
