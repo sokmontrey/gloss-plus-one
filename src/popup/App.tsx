@@ -29,6 +29,7 @@ interface PopupState {
   config: ProgressionConfig;
   targetLanguage: UserContext["targetLanguage"];
   profile: UserInterestProfile | null;
+  assessmentScore: number;
 }
 
 interface PageControlState {
@@ -188,6 +189,7 @@ export default function App() {
     config: DEFAULT_CONFIG,
     targetLanguage: "es",
     profile: null,
+    assessmentScore: 0,
   });
   const [isPlanning, setIsPlanning] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -236,6 +238,7 @@ export default function App() {
         },
         targetLanguage,
         profile: (result[INTEREST_KEY] as UserInterestProfile | undefined) ?? null,
+        assessmentScore: userContext?.assessmentScore ?? 0,
       });
       setPageControl((current) => ({
         ...nextPageControl,
@@ -396,13 +399,20 @@ export default function App() {
 
   return (
     <main className="flex min-w-[320px] flex-col gap-4 bg-background p-4 text-foreground">
-      <div className="space-y-1">
-        <p className="text-sm font-medium">GlossPlusOne</p>
-        <p className="text-xs text-muted-foreground">
-          Tier {state.bank?.currentTier ?? 1} for {state.targetLanguage.toUpperCase()}.
-          {" "}
-          {state.bank?.phrases.length ?? 0} phrases ready.
-        </p>
+      <div className="flex items-start justify-between">
+        <div className="space-y-1">
+          <p className="text-sm font-medium">GlossPlusOne</p>
+          <p className="text-xs text-muted-foreground">
+            Tier {state.bank?.currentTier ?? 1} for {state.targetLanguage.toUpperCase()}.
+            {" "}
+            {state.bank?.phrases.length ?? 0} phrases ready.
+          </p>
+        </div>
+        {state.assessmentScore > 0 && (
+          <Badge variant="secondary" className="px-2 shadow-sm text-[10px]">
+            Score: <span className="ml-1 text-primary">{state.assessmentScore}</span>
+          </Badge>
+        )}
       </div>
 
       <section className="rounded-lg border border-border bg-muted/30 p-3">

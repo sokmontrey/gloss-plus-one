@@ -14,6 +14,7 @@ import {
   getPhraseBank,
   recordExposure,
   recordHoverDecay,
+  recordAssessmentProgressionBoost,
   resetPhraseBank,
   saveProgressionConfig,
   savePhraseBank,
@@ -361,8 +362,26 @@ Return ONLY pure JSON. No markdown blocks, no quotes, no explanation.`;
         
         if (typeof result.score === "number") {
           const newScore = (userContext.assessmentScore || 0) + result.score;
-          await saveUserContext({ assessmentScore: newScore });
+          const history = userContext.assessmentHistory || [];
+          
+          history.unshift({
+            id: crypto.randomUUID(),
+            phrase,
+            userTranslation,
+            score: result.score,
+            timestamp: Date.now(),
+          });
+          
+          // Keep history bounded to last 50 entries
+          if (history.length > 50) {
+            history.pop();
+          }
+
+          await saveUserContext({ assessmentScore: newScore, assessmentHistory: history });
           console.log(`[GlossPlusOne:router] Assessed translation score ${result.score}/5. New total: ${newScore}`);
+          
+          // Boost progression confidence for doing active recall
+          await recordAssessmentProgressionBoost(language, result.score);
         }
 
         sendResponse({ success: true, result });

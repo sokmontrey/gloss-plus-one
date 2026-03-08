@@ -21,6 +21,8 @@ interface DashboardState {
   bank: PhraseBank | null;
   config: ProgressionConfig;
   targetLanguage: UserContext["targetLanguage"];
+  assessmentScore: number;
+  assessmentHistory: UserContext["assessmentHistory"];
 }
 
 function thresholdToSliderValue(threshold: number): number {
@@ -51,6 +53,8 @@ export default function Dashboard() {
     bank: null,
     config: DEFAULT_CONFIG,
     targetLanguage: "es",
+    assessmentScore: 0,
+    assessmentHistory: [],
   });
   const [plannerQueued, setPlannerQueued] = useState(false);
 
@@ -72,6 +76,8 @@ export default function Dashboard() {
           ...(result[CONFIG_KEY] as Partial<ProgressionConfig> | undefined),
         },
         targetLanguage,
+        assessmentScore: userContext?.assessmentScore ?? 0,
+        assessmentHistory: userContext?.assessmentHistory ?? [],
       });
       setPlannerQueued(false);
     };
@@ -126,12 +132,19 @@ export default function Dashboard() {
 
   return (
     <div className="min-h-screen bg-background text-foreground">
-      <header className="sticky top-0 z-10 border-b border-border bg-background/95 px-6 py-4 backdrop-blur">
-        <h1 className="text-xl font-semibold tracking-tight">GlossPlusOne</h1>
-        <p className="text-sm text-muted-foreground">
-          {phrases.length} phrase{phrases.length !== 1 ? "s" : ""} · {state.targetLanguage.toUpperCase()} · Tier{" "}
-          {state.bank?.currentTier ?? 1}
-        </p>
+      <header className="sticky top-0 z-10 flex items-center justify-between border-b border-border bg-background/95 px-6 py-4 backdrop-blur">
+        <div>
+          <h1 className="text-xl font-semibold tracking-tight">GlossPlusOne</h1>
+          <p className="text-sm text-muted-foreground">
+            {phrases.length} phrase{phrases.length !== 1 ? "s" : ""} · {state.targetLanguage.toUpperCase()} · Tier{" "}
+            {state.bank?.currentTier ?? 1}
+          </p>
+        </div>
+        <div className="flex items-center gap-3">
+          <Badge variant="secondary" className="px-3 py-1 text-sm shadow-sm">
+            Assessment Score: <span className="ml-1.5 font-bold text-primary">{state.assessmentScore}</span>
+          </Badge>
+        </div>
       </header>
 
       <div className="mx-auto max-w-4xl px-6 py-6">
@@ -243,6 +256,30 @@ export default function Dashboard() {
             </div>
           )}
         </section>
+
+        {state.assessmentHistory && state.assessmentHistory.length > 0 && (
+          <section className="mt-8">
+            <h2 className="mb-3 text-sm font-medium">Assessment History</h2>
+            <div className="space-y-2">
+              {state.assessmentHistory.map((entry) => (
+                <div key={entry.id} className="rounded-lg border border-border bg-card p-4">
+                  <div className="flex items-center justify-between gap-4">
+                    <div className="font-medium">"{entry.phrase}"</div>
+                    <Badge variant={entry.score >= 4 ? "success" : entry.score >= 2 ? "warning" : "muted"}>
+                      {entry.score}/5
+                    </Badge>
+                  </div>
+                  <div className="mt-2 text-sm text-muted-foreground">
+                    <span className="opacity-70">Translation attempt:</span> "{entry.userTranslation}"
+                  </div>
+                  <div className="mt-1 text-xs text-muted-foreground/50">
+                    {new Date(entry.timestamp).toLocaleString()}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
       </div>
     </div>
   );

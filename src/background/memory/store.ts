@@ -21,6 +21,7 @@ const DEFAULT_USER_CONTEXT: UserContext = {
   progressionThreshold: 0.6,
   debugLearnerLevel: 0,
   assessmentScore: 0,
+  assessmentHistory: [],
   badges: [],
 };
 
@@ -62,6 +63,20 @@ function writeStorageValue<T>(key: string, value: T): Promise<void> {
 
 function isStringArray(value: unknown): value is string[] {
   return Array.isArray(value) && value.every((item) => typeof item === "string");
+}
+
+function isAssessmentHistoryArray(value: unknown): value is UserContext["assessmentHistory"] {
+  if (!Array.isArray(value)) return false;
+  return value.every(
+    (item) =>
+      typeof item === "object" &&
+      item !== null &&
+      typeof (item as Record<string, unknown>).id === "string" &&
+      typeof (item as Record<string, unknown>).phrase === "string" &&
+      typeof (item as Record<string, unknown>).userTranslation === "string" &&
+      typeof (item as Record<string, unknown>).score === "number" &&
+      typeof (item as Record<string, unknown>).timestamp === "number"
+  );
 }
 
 function sanitizeUserContext(input: unknown): Partial<UserContext> {
@@ -117,6 +132,10 @@ function sanitizeUserContext(input: unknown): Partial<UserContext> {
 
   if (typeof candidate.assessmentScore === "number") {
     sanitized.assessmentScore = candidate.assessmentScore;
+  }
+
+  if (isAssessmentHistoryArray(candidate.assessmentHistory)) {
+    sanitized.assessmentHistory = candidate.assessmentHistory;
   }
 
   if (isStringArray(candidate.badges)) {

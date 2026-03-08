@@ -7,6 +7,14 @@ export interface ArticleContext {
   estimatedReadingLevel: string;
 }
 
+export interface AssessmentHistoryEntry {
+  id: string;
+  phrase: string;
+  userTranslation: string;
+  score: number;
+  timestamp: number;
+}
+
 export interface UserContext {
   cefrBand: "A1" | "A2" | "B1" | "B2" | "C1" | "C2";
   cefrConfidence: number;
@@ -22,6 +30,7 @@ export interface UserContext {
   /** 0–1: debug override. 0 = nothing, 1 = everything (basics known, exploration mode). Persisted. */
   debugLearnerLevel: number;
   assessmentScore?: number;
+  assessmentHistory?: AssessmentHistoryEntry[];
   badges?: string[];
 }
 

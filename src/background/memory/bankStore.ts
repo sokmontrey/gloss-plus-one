@@ -135,6 +135,31 @@ export async function recordHoverDecay(phraseId: string, language: string): Prom
   await savePhraseBank(bank);
 }
 
+export async function recordAssessmentProgressionBoost(language: string, score: number): Promise<void> {
+  if (score < 3) return; // Only boost on pass
+  
+  const [bank, config] = await Promise.all([getPhraseBank(language), getProgressionConfig()]);
+  const sample = getProgressionSample(bank);
+  
+  if (sample.length === 0) return;
+  
+  let boosted = false;
+  // Boost confidence of phrases in the current sample
+  for (const phrase of sample) {
+    if (phrase.confidence < config.progressionThreshold) {
+      // Small boost for trying things out
+      phrase.confidence = clampConfidence(phrase.confidence + config.confidenceGainPerExposure * 1.5);
+      phrase.lastSeenAt = Date.now();
+      boosted = true;
+    }
+  }
+  
+  if (boosted) {
+    console.log(`[GlossPlusOne:bankStore] Boosted tracking phrase confidence due to assessment score ${score}/5`);
+    await savePhraseBank(bank);
+  }
+}
+
 export async function shouldTriggerProgression(language: string): Promise<boolean> {
   const [bank, config] = await Promise.all([getPhraseBank(language), getProgressionConfig()]);
   const sample = getProgressionSample(bank);
