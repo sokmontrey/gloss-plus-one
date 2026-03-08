@@ -1,11 +1,22 @@
 import { GLOSS_WRAPPER_CLASS } from "@/content/output";
 import type { ProgressionConfig } from "@/shared/types";
+import { isPlaying, playAudio, requestAndPlay } from "./audioPlayer";
 
 const hoverTimers = new Map<string, ReturnType<typeof setTimeout>>();
 let tooltipEl: HTMLElement | null = null;
 let activeSpan: HTMLElement | null = null;
 let activeConfig: ProgressionConfig | null = null;
 let listenersBound = false;
+let hideTimer: ReturnType<typeof setTimeout> | null = null;
+
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
 
 function createTooltipEl(): HTMLElement {
   const el = document.createElement("div");
@@ -22,10 +33,69 @@ function createTooltipEl(): HTMLElement {
     font-family: system-ui, sans-serif;
     font-size: 13px;
     line-height: 1.5;
-    pointer-events: none;
+    pointer-events: auto;
     display: none;
     transition: opacity 0.15s ease;
   `;
+  el.addEventListener("click", (event) => {
+    const target = event.target;
+    if (!(target instanceof Element)) {
+      return;
+    }
+
+    const button = target.closest("#gloss-speaker-btn");
+    if (!(button instanceof HTMLElement)) {
+      return;
+    }
+
+    const text = button.getAttribute("data-text") ?? "";
+    const language = button.getAttribute("data-language") ?? "es";
+    const label = button.querySelector("#gloss-speaker-label");
+
+    if (isPlaying(text)) {
+      playAudio("", "");
+      if (label instanceof HTMLElement) {
+        label.textContent = "Listen";
+      }
+      return;
+    }
+
+    if (label instanceof HTMLElement) {
+      label.textContent = "...";
+    }
+    button.style.opacity = "0.6";
+
+    void requestAndPlay(
+      text,
+      language,
+      () => {
+        if (label instanceof HTMLElement) {
+          label.textContent = "...";
+        }
+        button.style.opacity = "0.6";
+      },
+      () => {
+        if (label instanceof HTMLElement) {
+          label.textContent = "⏹ Stop";
+        }
+        button.style.opacity = "1";
+      },
+    ).catch(() => {
+      if (label instanceof HTMLElement) {
+        label.textContent = "Listen";
+      }
+      button.style.opacity = "1";
+    });
+  });
+  el.addEventListener("mouseenter", () => {
+    if (hideTimer) {
+      clearTimeout(hideTimer);
+      hideTimer = null;
+    }
+  });
+  el.addEventListener("mouseleave", () => {
+    hideTooltip();
+  });
   document.body.appendChild(el);
   return el;
 }
@@ -40,12 +110,31 @@ function getTooltipEl(): HTMLElement {
 }
 
 function hideTooltip(): void {
-  getTooltipEl().style.display = "none";
+  const tooltip = getTooltipEl();
+  tooltip.style.display = "none";
   activeSpan = null;
+  if (hideTimer) {
+    clearTimeout(hideTimer);
+    hideTimer = null;
+  }
+}
+
+function scheduleHideTooltip(): void {
+  if (hideTimer) {
+    clearTimeout(hideTimer);
+  }
+
+  hideTimer = window.setTimeout(() => {
+    hideTooltip();
+  }, 120);
 }
 
 function showTooltip(span: HTMLElement): void {
   const tooltip = getTooltipEl();
+  if (hideTimer) {
+    clearTimeout(hideTimer);
+    hideTimer = null;
+  }
   const foreignPhrase = span.textContent ?? "";
   const originalPhrase = span.getAttribute("data-gloss-source") ?? "";
   const confidence = parseFloat(span.getAttribute("data-gloss-confidence") ?? "0");
@@ -57,12 +146,37 @@ function showTooltip(span: HTMLElement): void {
     return `<span style="color:${color}">●</span>`;
   }).join("");
   const isStructural = phraseType === "structural";
+  const speakerButton = `
+    <button
+      id="gloss-speaker-btn"
+      data-text="${escapeHtml(foreignPhrase)}"
+      data-language="${escapeHtml(language)}"
+      style="
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        margin-top: 8px;
+        padding: 4px 10px;
+        background: rgba(251,191,36,0.12);
+        border: 1px solid rgba(251,191,36,0.4);
+        border-radius: 6px;
+        cursor: pointer;
+        font-size: 12px;
+        color: #92400e;
+        font-family: system-ui;
+        transition: background 0.15s ease;
+      "
+    >
+      🔊 <span id="gloss-speaker-label">${isPlaying(foreignPhrase) ? "⏹ Stop" : "Listen"}</span>
+    </button>
+  `;
 
   tooltip.innerHTML = `
-    <div style="font-size:16px;font-weight:600;color:#1f2937">${foreignPhrase}</div>
+    <div style="font-size:16px;font-weight:600;color:#1f2937">${escapeHtml(foreignPhrase)}</div>
     <div data-def style="color:#374151;margin-top:4px;${isStructural ? "" : "font-style:italic;"}">
-      ${isStructural ? originalPhrase : "loading definition..."}
+      ${isStructural ? escapeHtml(originalPhrase) : "loading definition..."}
     </div>
+    ${speakerButton}
     <div style="margin-top:8px;display:flex;gap:2px;align-items:center">
       ${dots}
       <span style="margin-left:6px;font-size:11px;color:#9ca3af">${Math.round(confidence * 100)}%</span>
@@ -184,7 +298,12 @@ function handleMouseOut(event: MouseEvent): void {
     hoverTimers.delete(phraseId);
   }
 
-  hideTooltip();
+  const relatedTarget = event.relatedTarget;
+  if (relatedTarget instanceof Element && relatedTarget.closest("#gloss-tooltip")) {
+    return;
+  }
+
+  scheduleHideTooltip();
 }
 
 export function initHoverListeners(

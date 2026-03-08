@@ -1,4 +1,5 @@
 import { callPlannerLLM, runPlanner } from "@/background/agent/planner";
+import { synthesizeSpeech } from "@/background/api/elevenlabs";
 import {
   getPhraseBank,
   recordExposure,
@@ -77,6 +78,19 @@ export async function routeBackgroundMessage(
     case "UPDATE_PROGRESSION_CONFIG": {
       await saveProgressionConfig(message.payload);
       break;
+    }
+
+    case "REQUEST_AUDIO": {
+      const { text, language } = message.payload;
+
+      try {
+        const dataUri = await synthesizeSpeech(text, language);
+        sendResponse({ dataUri });
+      } catch (error) {
+        console.error("[GlossPlusOne:router] Audio synthesis failed:", error);
+        sendResponse({ error: error instanceof Error ? error.message : "UNKNOWN" });
+      }
+      return true;
     }
 
     default: {

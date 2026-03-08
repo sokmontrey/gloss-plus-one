@@ -2,6 +2,7 @@ import { enrichPageContent } from "./reader/enricher";
 import { createMetrics } from "./reader/metrics";
 import { resolveDomPath } from "./reader/domPath";
 import { withReadOnlyDomGuard } from "./reader/runtimeGuards";
+import { initSelectionPlayer } from "./overlay/selectionPlayer";
 import { initHoverListeners } from "./overlay/tooltipManager";
 import type { BackgroundToContentMessage, ReplacementInstruction, SerializableParagraph } from "@/shared/messages";
 import { applyOutputAndAnimate, injectOutputStyles } from "./output";
@@ -19,6 +20,7 @@ let currentBank: BankPhrase[] = [];
 let currentLanguage = "es";
 let plannerRequested = false;
 let hoverInitialized = false;
+let selectionInitialized = false;
 let initializingBadge: HTMLElement | null = null;
 
 const USER_CONTEXT_KEY = "userContext";
@@ -241,6 +243,13 @@ async function initPage(): Promise<void> {
   if (!hoverInitialized) {
     initHoverListeners(config, userContext.targetLanguage, userContext.nativeLanguage, "structural");
     hoverInitialized = true;
+  }
+
+  if (!selectionInitialized) {
+    initSelectionPlayer(userContext.targetLanguage);
+    selectionInitialized = true;
+  } else {
+    initSelectionPlayer(userContext.targetLanguage);
   }
 
   currentBank = await getBankPhrases(currentLanguage);

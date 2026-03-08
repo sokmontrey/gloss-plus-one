@@ -10,7 +10,11 @@ chrome.runtime.onMessage.addListener(
     sendResponse: (response?: unknown) => void,
   ) => {
     void routeBackgroundMessage(message, sender, sendResponse);
-    return message.type === "GET_BANK" || message.type === "FETCH_DEFINITION";
+    return (
+      message.type === "GET_BANK" ||
+      message.type === "FETCH_DEFINITION" ||
+      message.type === "REQUEST_AUDIO"
+    );
   },
 );
 

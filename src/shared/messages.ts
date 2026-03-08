@@ -72,6 +72,22 @@ export interface UpdateProgressionConfigMessage {
   payload: Partial<ProgressionConfig>;
 }
 
+export interface RequestAudioMessage {
+  type: "REQUEST_AUDIO";
+  payload: {
+    text: string;
+    language: string;
+  };
+}
+
+export interface AudioReadyMessage {
+  type: "AUDIO_READY";
+  payload: {
+    text: string;
+    dataUri: string;
+  };
+}
+
 export type ContentToBackgroundMessage =
   | GetBankMessage
   | RecordExposureMessage
@@ -79,7 +95,8 @@ export type ContentToBackgroundMessage =
   | CheckProgressionMessage
   | TriggerPlannerMessage
   | FetchDefinitionMessage
-  | UpdateProgressionConfigMessage;
+  | UpdateProgressionConfigMessage
+  | RequestAudioMessage;
 
 /** Single replacement target: one phrase within a paragraph identified by domPath. */
 export interface ReplacementInstruction {
@@ -100,4 +117,4 @@ export interface ReplacementInstruction {
   isReinforcement?: boolean;
 }
 
-export type BackgroundToContentMessage = BankReadyMessage;
+export type BackgroundToContentMessage = BankReadyMessage | AudioReadyMessage;
