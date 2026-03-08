@@ -212,14 +212,14 @@ function parsePlannerResponse(raw: string): RawPlannerPhrase[] {
 function buildRecentReadingSamples(signals: PageSignal[]): string[] {
   return [...signals]
     .reverse()
-    .filter((signal) => signal.contentSnippet.trim().length > 0)
+    .filter((signal) => typeof signal.contentSnippet === "string" && signal.contentSnippet.trim().length > 0)
     .slice(0, 4)
     .map((signal) => {
       const topicLabel = signal.topic ? `Topic: ${signal.topic}` : "Topic: unknown";
       return `Title: ${signal.title}
 Domain: ${signal.domain}
 ${topicLabel}
-Excerpt: ${signal.contentSnippet}`;
+Excerpt: ${signal.contentSnippet.trim()}`;
     });
 }
 

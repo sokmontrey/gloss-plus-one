@@ -11,6 +11,37 @@ const DEFAULT_INTEREST_PROFILE: UserInterestProfile = {
   lastUpdatedAt: 0,
 };
 
+function normalizePageSignal(signal: unknown): PageSignal | null {
+  if (!signal || typeof signal !== "object") {
+    return null;
+  }
+
+  const candidate = signal as Partial<PageSignal>;
+  if (
+    typeof candidate.id !== "string" ||
+    typeof candidate.url !== "string" ||
+    typeof candidate.title !== "string" ||
+    typeof candidate.domain !== "string" ||
+    typeof candidate.pageType !== "string" ||
+    typeof candidate.replacementCount !== "number" ||
+    typeof candidate.visitedAt !== "number"
+  ) {
+    return null;
+  }
+
+  return {
+    id: candidate.id,
+    url: candidate.url,
+    title: candidate.title,
+    domain: candidate.domain,
+    pageType: candidate.pageType,
+    topic: typeof candidate.topic === "string" ? candidate.topic : null,
+    contentSnippet: typeof candidate.contentSnippet === "string" ? candidate.contentSnippet : "",
+    replacementCount: candidate.replacementCount,
+    visitedAt: candidate.visitedAt,
+  };
+}
+
 export async function recordPageSignal(signal: Omit<PageSignal, "id">): Promise<void> {
   const stored = await getPageSignals();
   stored.push({ ...signal, id: crypto.randomUUID() });
@@ -20,7 +51,14 @@ export async function recordPageSignal(signal: Omit<PageSignal, "id">): Promise<
 
 export async function getPageSignals(): Promise<PageSignal[]> {
   const result = await chrome.storage.local.get(SIGNAL_KEY);
-  return (result[SIGNAL_KEY] as PageSignal[]) ?? [];
+  const stored = result[SIGNAL_KEY];
+  if (!Array.isArray(stored)) {
+    return [];
+  }
+
+  return stored
+    .map((signal) => normalizePageSignal(signal))
+    .filter((signal): signal is PageSignal => signal !== null);
 }
 
 export async function getInterestProfile(): Promise<UserInterestProfile> {
