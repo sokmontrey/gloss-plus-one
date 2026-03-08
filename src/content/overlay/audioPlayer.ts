@@ -4,9 +4,6 @@ const LANG_MAP: Record<string, string> = {
   de: "de-DE",
   pt: "pt-BR",
   it: "it-IT",
-  ja: "ja-JP",
-  ko: "ko-KR",
-  zh: "zh-CN",
 };
 
 let currentText = "";
@@ -31,11 +28,10 @@ export function requestAndPlay(
   const utterance = new SpeechSynthesisUtterance(text);
   utterance.lang = LANG_MAP[language] ?? "es-ES";
   utterance.rate = 0.85;
-  utterance.pitch = 1.0;
 
   const voices = window.speechSynthesis.getVoices();
-  const langCode = LANG_MAP[language] ?? "es-ES";
-  const match = voices.find((voice) => voice.lang.startsWith(langCode.split("-")[0]));
+  const langPrefix = (LANG_MAP[language] ?? "es").split("-")[0];
+  const match = voices.find((voice) => voice.lang.startsWith(langPrefix));
   if (match) utterance.voice = match;
 
   onLoadStart?.();
@@ -60,7 +56,6 @@ export function stopPlaying(): void {
   currentText = "";
 }
 
-export function playAudio(dataUri: string, text: string): void {
-  void dataUri;
+export function playAudio(_dataUri: string, text: string): void {
   requestAndPlay(text, "es");
 }

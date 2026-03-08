@@ -138,13 +138,13 @@ function showSelectionPlayer(text: string, language: string, selection: Selectio
   });
 
   addButton.addEventListener("click", () => {
-    addButton.textContent = "...";
-    addButton.style.opacity = "0.6";
-    window.setTimeout(() => {
-      if (addButton.textContent === "...") {
-        addButton.textContent = "timeout — try again";
-        addButton.style.opacity = "1";
-      }
+    const addBtnEl = addButton as HTMLButtonElement;
+    addBtnEl.disabled = true;
+    addBtnEl.textContent = "...";
+
+    const timeout = window.setTimeout(() => {
+      addBtnEl.textContent = "timeout";
+      addBtnEl.disabled = false;
     }, 8000);
 
     chrome.runtime.sendMessage(
@@ -157,26 +157,25 @@ function showSelectionPlayer(text: string, language: string, selection: Selectio
           sourceTitle: document.title,
         },
       },
-      (response?: { success?: boolean; targetPhrase?: string }) => {
+      (response: { success: boolean; targetPhrase?: string } | undefined) => {
+        clearTimeout(timeout);
         if (chrome.runtime.lastError) {
-          console.warn("[GlossPlusOne:selection] Add phrase message failed:", chrome.runtime.lastError.message);
-          addButton.textContent = "failed";
-          addButton.style.opacity = "1";
+          console.error(
+            "[GlossPlusOne:selection] Add phrase error:",
+            chrome.runtime.lastError.message,
+          );
+          addBtnEl.textContent = "error";
+          addBtnEl.disabled = false;
           return;
         }
-
         if (response?.success) {
-          addButton.textContent = `✓ ${response.targetPhrase ?? "added"}`;
-          addButton.style.color = "rgba(251,191,36,1)";
-          addButton.style.opacity = "1";
-          window.setTimeout(() => {
-            hideSelectionPlayer();
-          }, 1500);
-          return;
+          addBtnEl.textContent = `✓ ${response.targetPhrase ?? "added"}`;
+          addBtnEl.style.color = "rgba(251,191,36,1)";
+          window.setTimeout(hideSelectionPlayer, 1800);
+        } else {
+          addBtnEl.textContent = "failed";
+          addBtnEl.disabled = false;
         }
-
-        addButton.textContent = "failed";
-        addButton.style.opacity = "1";
       },
     );
   });

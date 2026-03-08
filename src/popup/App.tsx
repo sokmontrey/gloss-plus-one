@@ -172,10 +172,35 @@ export default function App() {
   }, []);
 
   const handlePlanner = async (reason: "debug_increment" | "debug_decrement") => {
-    const shouldShowPlanningState = reason === "debug_increment";
-    if (shouldShowPlanningState) {
+    if (reason === "debug_increment") {
       setIsPlanning(true);
-      window.setTimeout(() => setIsPlanning(false), 3000);
+      const language = state.targetLanguage;
+
+      chrome.runtime.sendMessage({
+        type: "ENSURE_STRUCTURAL_TRANSLATIONS",
+        payload: { language },
+      });
+
+      chrome.runtime.sendMessage({
+        type: "TRIGGER_PLANNER",
+        payload: { reason: "debug_increment", language },
+      });
+
+      chrome.runtime.sendMessage({
+        type: "TRIGGER_PLANNER",
+        payload: { reason: "progression", language },
+      });
+
+      window.setTimeout(() => {
+        setIsPlanning(false);
+        void chrome.storage.local.get(BANK_KEY).then((result) => {
+          setState((current) => ({
+            ...current,
+            bank: getPhraseBankFromSnapshot(result[BANK_KEY], current.targetLanguage),
+          }));
+        });
+      }, 3500);
+      return;
     }
 
     await chrome.runtime.sendMessage({
@@ -220,6 +245,11 @@ export default function App() {
         ...currentUserContext,
         targetLanguage: nextLanguage,
       },
+    });
+
+    chrome.runtime.sendMessage({
+      type: "ENSURE_STRUCTURAL_TRANSLATIONS",
+      payload: { language: nextLanguage },
     });
   };
 

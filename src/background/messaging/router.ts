@@ -1,4 +1,12 @@
-import { callPlannerLLM, extractPageTopic, runPlanner } from "@/background/agent/planner";
+import {
+  callPlannerLLM,
+  clearProcessedUrls,
+  ensureStructuralTranslations,
+  extractPageTopic,
+  parseJsonResponse,
+  runPageDiscovery,
+  runPlanner,
+} from "@/background/agent/planner";
 import { synthesizeSpeech } from "@/background/api/elevenlabs";
 import { callGemini } from "@/background/api/gemini";
 import { callGroq } from "@/background/api/groq";
@@ -39,28 +47,13 @@ function parseAddPhraseResponse(raw: string): {
   phraseType: "structural" | "lexical";
   tier: number;
 } {
-  let clean = raw
-    .replace(/```json\s*/gi, "")
-    .replace(/```\s*/g, "")
-    .trim();
-
-  if (clean.startsWith("[")) {
-    const parsedArray = JSON.parse(clean) as Array<Record<string, unknown>>;
-    clean = JSON.stringify(parsedArray[0] ?? {});
+  const payload = parseJsonResponse(raw);
+  const candidate = Array.isArray(payload) ? payload[0] : payload;
+  if (!candidate || typeof candidate !== "object") {
+    throw new Error("ADD_PHRASE_PARSE_FAILED");
   }
 
-  if (clean.startsWith("{")) {
-    const parsedObject = JSON.parse(clean) as Record<string, unknown>;
-    const candidate =
-      parsedObject.data ??
-      parsedObject.result ??
-      parsedObject.item ??
-      parsedObject.translation ??
-      parsedObject;
-    clean = JSON.stringify(candidate);
-  }
-
-  const parsed = JSON.parse(clean) as Record<string, unknown>;
+  const parsed = candidate as Record<string, unknown>;
   const targetPhrase = typeof parsed.targetPhrase === "string"
     ? parsed.targetPhrase.replace(/\s+/g, " ").trim()
     : typeof parsed.translation === "string"
@@ -123,26 +116,29 @@ export async function routeBackgroundMessage(
 
     case "TRIGGER_PLANNER": {
       const { reason, language } = message.payload;
-      await runPlanner(reason, language);
-
-      const tabId = sender.tab?.id;
-      if (typeof tabId === "number") {
-        const bank = await getPhraseBank(language);
-        const response: BackgroundToContentMessage = {
-          type: "BANK_READY",
-          payload: {
-            language,
-            phrases: bank.phrases,
-            currentTier: bank.currentTier,
-            lastBatchId: bank.lastBatchId,
-            reason,
-          },
-        };
-
-        chrome.tabs.sendMessage(tabId, response).catch((error) => {
-          console.warn("[GlossPlusOne:router] Failed to send BANK_READY", error);
-        });
+      if (reason === "progression" || reason === "debug_increment") {
+        await clearProcessedUrls();
       }
+      void runPlanner(reason, language);
+      break;
+    }
+
+    case "ENSURE_STRUCTURAL_TRANSLATIONS": {
+      const { language } = message.payload as { language: string };
+      const userContext = await getUserContext();
+      void ensureStructuralTranslations(language, userContext.nativeLanguage);
+      break;
+    }
+
+    case "RUN_PAGE_DISCOVERY": {
+      const { pageText, pageTitle, pageUrl, language } =
+        message.payload as {
+          pageText: string;
+          pageTitle: string;
+          pageUrl: string;
+          language: string;
+        };
+      void runPageDiscovery(pageText, pageTitle, pageUrl, language);
       break;
     }
 

@@ -65,6 +65,23 @@ export interface TriggerPlannerMessage {
   };
 }
 
+export interface EnsureStructuralTranslationsMessage {
+  type: "ENSURE_STRUCTURAL_TRANSLATIONS";
+  payload: {
+    language: string;
+  };
+}
+
+export interface RunPageDiscoveryMessage {
+  type: "RUN_PAGE_DISCOVERY";
+  payload: {
+    pageText: string;
+    pageTitle: string;
+    pageUrl: string;
+    language: string;
+  };
+}
+
 export interface FetchDefinitionMessage {
   type: "FETCH_DEFINITION";
   payload: {
@@ -133,6 +150,8 @@ export type ContentToBackgroundMessage =
   | RecordHoverDecayMessage
   | CheckProgressionMessage
   | TriggerPlannerMessage
+  | EnsureStructuralTranslationsMessage
+  | RunPageDiscoveryMessage
   | FetchDefinitionMessage
   | UpdateProgressionConfigMessage
   | RequestAudioMessage
