@@ -48,6 +48,7 @@ export interface PhraseBatch {
   triggerReason: "initial" | "progression" | "debug_increment" | "debug_decrement" | "manual";
   phraseCount: number;
   plannerContext: string;
+  progressionTriggeredAt?: number;
 }
 
 export interface PhraseBank {

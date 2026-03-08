@@ -38,6 +38,64 @@ interface PageControlState {
   saving: boolean;
 }
 
+function getStageProgress(bank: PhraseBank | null, threshold: number): {
+  label: string;
+  progress: number;
+  averageConfidence: number;
+  phraseCount: number;
+} {
+  if (!bank) {
+    return {
+      label: "No progression data yet",
+      progress: 0,
+      averageConfidence: 0,
+      phraseCount: 0,
+    };
+  }
+
+  const latestBatch = [...bank.batches]
+    .reverse()
+    .find((batch) => batch.triggerReason === "initial" || batch.triggerReason === "progression");
+
+  if (!latestBatch) {
+    return {
+      label: "Waiting for first discovery batch",
+      progress: 0,
+      averageConfidence: 0,
+      phraseCount: 0,
+    };
+  }
+
+  const sample = bank.phrases
+    .filter((phrase) => phrase.addedByBatch === latestBatch.id)
+    .filter((phrase) => phrase.exposures > 0)
+    .sort((left, right) => {
+      const leftScore = left.lastSeenAt || left.addedAt;
+      const rightScore = right.lastSeenAt || right.addedAt;
+      return rightScore - leftScore;
+    })
+    .slice(0, 10);
+
+  if (sample.length === 0) {
+    return {
+      label: "Read with the newest phrases to unlock the next stage",
+      progress: 0,
+      averageConfidence: 0,
+      phraseCount: 0,
+    };
+  }
+
+  const averageConfidence = sample.reduce((sum, phrase) => sum + phrase.confidence, 0) / sample.length;
+  const progress = Math.max(0, Math.min(1, averageConfidence / Math.max(threshold, 0.01)));
+
+  return {
+    label: `${sample.length}/10 newest phrases tracked`,
+    progress,
+    averageConfidence,
+    phraseCount: sample.length,
+  };
+}
+
 function thresholdToSliderValue(threshold: number): number {
   const closestIndex = PROGRESSION_STEPS.reduce(
     (bestIndex, value, index) =>
@@ -129,6 +187,10 @@ export default function App() {
       return pageControl.url;
     }
   }, [pageControl.url]);
+  const stageProgress = useMemo(
+    () => getStageProgress(state.bank, state.config.progressionThreshold),
+    [state.bank, state.config.progressionThreshold],
+  );
 
   useEffect(() => {
     const refresh = async () => {
@@ -184,11 +246,6 @@ export default function App() {
       chrome.runtime.sendMessage({
         type: "TRIGGER_PLANNER",
         payload: { reason: "debug_increment", language },
-      });
-
-      chrome.runtime.sendMessage({
-        type: "TRIGGER_PLANNER",
-        payload: { reason: "progression", language },
       });
 
       window.setTimeout(() => {
@@ -350,8 +407,20 @@ export default function App() {
 
       <section className="rounded-lg border border-border bg-muted/30 p-3">
         <div className="flex items-center justify-between">
-          <span className="text-xs text-muted-foreground">Phrase Bank Level</span>
+          <span className="text-xs text-muted-foreground">Stage Progress</span>
           <Badge variant="warning">Tier {state.bank?.currentTier ?? 1}</Badge>
+        </div>
+        <div className="mt-3">
+          <div className="h-2 overflow-hidden rounded-full bg-muted">
+            <div
+              className="h-full rounded-full bg-primary transition-all"
+              style={{ width: `${Math.round(stageProgress.progress * 100)}%` }}
+            />
+          </div>
+          <div className="mt-2 flex items-center justify-between text-[11px] text-muted-foreground">
+            <span>{stageProgress.label}</span>
+            <span>{Math.round(stageProgress.averageConfidence * 100)}%</span>
+          </div>
         </div>
         <p className="mt-2 text-center text-xs text-muted-foreground">
           {state.bank?.phrases.length ?? 0} phrases · {state.bank?.batches.length ?? 0} batches
@@ -364,7 +433,7 @@ export default function App() {
             className="min-w-0 justify-center gap-1.5"
           >
             <Minus className="shrink-0" />
-            <span className="truncate">Remove batch</span>
+            <span className="truncate">Reset stage</span>
           </Button>
           <Button
             size="sm"
@@ -373,10 +442,12 @@ export default function App() {
             className="min-w-0 justify-center gap-1.5"
           >
             <Plus className="shrink-0" />
-            <span className="truncate">{isPlanning ? "Planning..." : "New batch"}</span>
+            <span className="truncate">{isPlanning ? "Advancing..." : "Next stage"}</span>
           </Button>
         </div>
-        <p className="mt-2 text-[11px] text-muted-foreground">Phrase count updates as new batches arrive.</p>
+        <p className="mt-2 text-[11px] text-muted-foreground">
+          New discovery phrases raise this bar. High average confidence unlocks harder vocabulary.
+        </p>
       </section>
 
       <section className="rounded-lg border border-border bg-muted/30 p-3">

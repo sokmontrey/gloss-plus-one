@@ -1,13 +1,59 @@
 import { BANK_KEY, getPhraseBankFromSnapshot, savePhraseBankToSnapshot } from "@/shared/phraseBankStorage";
-import type { PhraseBank, ProgressionConfig } from "@/shared/types";
+import type { BankPhrase, PhraseBank, PhraseBatch, ProgressionConfig } from "@/shared/types";
 const CONFIG_KEY = "glossProgressionConfig";
+const MIN_PROGRESS_PHRASES = 3;
+const MAX_PROGRESS_SAMPLE = 10;
 
 const DEFAULT_PROGRESSION_CONFIG: ProgressionConfig = {
   progressionThreshold: 0.7,
-  confidenceGainPerExposure: 0.03,
-  confidenceDecayPerHover: 0.1,
+  confidenceGainPerExposure: 0.16,
+  confidenceDecayPerHover: 0.12,
   hoverDecayThresholdMs: 2000,
 };
+
+function clampConfidence(value: number): number {
+  return Math.max(0, Math.min(1, value));
+}
+
+function isProgressionBatch(batch: PhraseBatch): boolean {
+  return batch.triggerReason === "initial" || batch.triggerReason === "progression";
+}
+
+function getLatestProgressionBatch(bank: PhraseBank): PhraseBatch | null {
+  for (let index = bank.batches.length - 1; index >= 0; index -= 1) {
+    const batch = bank.batches[index];
+    if (isProgressionBatch(batch) && !batch.progressionTriggeredAt) {
+      return batch;
+    }
+  }
+
+  return null;
+}
+
+function getProgressionSample(bank: PhraseBank): typeof bank.phrases {
+  const batch = getLatestProgressionBatch(bank);
+  if (!batch) {
+    return [];
+  }
+
+  return bank.phrases
+    .filter((phrase) => phrase.addedByBatch === batch.id)
+    .filter((phrase) => phrase.exposures > 0)
+    .sort((left, right) => {
+      const leftScore = left.lastSeenAt || left.addedAt;
+      const rightScore = right.lastSeenAt || right.addedAt;
+      return rightScore - leftScore;
+    })
+    .slice(0, MAX_PROGRESS_SAMPLE);
+}
+
+function getAverageConfidence(sample: BankPhrase[]): number {
+  if (sample.length === 0) {
+    return 0;
+  }
+
+  return sample.reduce((sum, phrase) => sum + phrase.confidence, 0) / sample.length;
+}
 
 export async function getPhraseBank(language: string): Promise<PhraseBank> {
   const result = await chrome.storage.local.get(BANK_KEY);
@@ -58,7 +104,7 @@ export async function recordExposure(
     phrase.firstSeenUrl = url;
     phrase.firstSeenTitle = title;
   }
-  phrase.confidence = Math.min(1, phrase.confidence + config.confidenceGainPerExposure);
+  phrase.confidence = clampConfidence(phrase.confidence + config.confidenceGainPerExposure);
 
   await savePhraseBank(bank);
 }
@@ -72,25 +118,40 @@ export async function recordHoverDecay(phraseId: string, language: string): Prom
   }
 
   phrase.hoverCount += 1;
-  phrase.confidence = Math.max(0, phrase.confidence - config.confidenceDecayPerHover);
+  phrase.confidence = clampConfidence(phrase.confidence - config.confidenceDecayPerHover);
 
   await savePhraseBank(bank);
 }
 
 export async function shouldTriggerProgression(language: string): Promise<boolean> {
   const [bank, config] = await Promise.all([getPhraseBank(language), getProgressionConfig()]);
-  const currentTierPhrases = bank.phrases.filter(
-    (phrase) => phrase.tier === bank.currentTier && phrase.exposures >= 3,
-  );
-
-  if (currentTierPhrases.length < 3) {
+  const sample = getProgressionSample(bank);
+  if (sample.length < MIN_PROGRESS_PHRASES) {
     return false;
   }
 
-  const averageConfidence =
-    currentTierPhrases.reduce((sum, phrase) => sum + phrase.confidence, 0) / currentTierPhrases.length;
+  return getAverageConfidence(sample) >= config.progressionThreshold;
+}
 
-  return averageConfidence >= config.progressionThreshold;
+export async function consumeProgressionTrigger(language: string): Promise<boolean> {
+  const [bank, config] = await Promise.all([getPhraseBank(language), getProgressionConfig()]);
+  const latestBatch = getLatestProgressionBatch(bank);
+  if (!latestBatch) {
+    return false;
+  }
+
+  const sample = getProgressionSample(bank);
+  if (sample.length < MIN_PROGRESS_PHRASES) {
+    return false;
+  }
+
+  if (getAverageConfidence(sample) < config.progressionThreshold) {
+    return false;
+  }
+
+  latestBatch.progressionTriggeredAt = Date.now();
+  await savePhraseBank(bank);
+  return true;
 }
 
 export async function removeLastBatch(language: string): Promise<void> {

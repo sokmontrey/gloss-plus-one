@@ -64,7 +64,7 @@ export async function runPlanner(triggerReason: TriggerPlannerReason, language: 
 
   const bank = await getPhraseBank(language);
   const nextTier =
-    triggerReason === "debug_increment"
+    triggerReason === "debug_increment" || triggerReason === "progression"
       ? Math.min(bank.currentTier + 1, MAX_TIER)
       : bank.currentTier;
   const changed =

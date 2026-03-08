@@ -11,12 +11,12 @@ import { synthesizeSpeech } from "@/background/api/elevenlabs";
 import { callGemini } from "@/background/api/gemini";
 import { callGroq } from "@/background/api/groq";
 import {
+  consumeProgressionTrigger,
   getPhraseBank,
   recordExposure,
   recordHoverDecay,
   saveProgressionConfig,
   savePhraseBank,
-  shouldTriggerProgression,
 } from "@/background/memory/bankStore";
 import {
   getPageSignals,
@@ -34,12 +34,7 @@ async function callStructuredTranslationLLM(prompt: string): Promise<string> {
     console.warn("[GlossPlusOne:router] Gemini translation failed, trying Groq:", error);
   }
 
-  try {
-    return await callGroq(prompt, "application/json");
-  } catch (error) {
-    console.warn("[GlossPlusOne:router] Groq translation failed, trying planner fallback:", error);
-    return await callPlannerLLM(prompt, "application/json");
-  }
+  return await callGroq(prompt, "application/json");
 }
 
 function parseAddPhraseResponse(raw: string): {
@@ -95,6 +90,12 @@ export async function routeBackgroundMessage(
     case "RECORD_EXPOSURE": {
       const { phraseId, url, title, language } = message.payload;
       await recordExposure(phraseId, url, title, language);
+      const consumed = await consumeProgressionTrigger(language);
+      if (consumed) {
+        console.log("[GlossPlusOne:router] Progression triggered after exposure");
+        await clearProcessedUrls();
+        void runPlanner("progression", language);
+      }
       break;
     }
 
@@ -106,9 +107,10 @@ export async function routeBackgroundMessage(
 
     case "CHECK_PROGRESSION": {
       const { language } = message.payload;
-      const shouldProgress = await shouldTriggerProgression(language);
-      if (shouldProgress) {
+      const consumed = await consumeProgressionTrigger(language);
+      if (consumed) {
         console.log("[GlossPlusOne:router] Progression triggered");
+        await clearProcessedUrls();
         void runPlanner("progression", language);
       }
       break;
@@ -256,7 +258,7 @@ Required format:
           targetLanguage: language,
           nativeLanguage: userContext.nativeLanguage,
           phraseType: parsed.phraseType,
-          tier: Math.max(1, Math.min(6, Math.round(parsed.tier || 1))),
+          tier: bank.currentTier,
           addedAt: Date.now(),
           addedByBatch: batchId,
           confidence: 0,
@@ -278,7 +280,6 @@ Required format:
         });
         bank.lastBatchId = batchId;
         bank.lastPlannerRunAt = Date.now();
-        bank.currentTier = Math.max(bank.currentTier, newPhrase.tier);
 
         await savePhraseBank(bank);
 
