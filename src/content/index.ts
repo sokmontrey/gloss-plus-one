@@ -260,12 +260,22 @@ async function runPathB(): Promise<void> {
 }
 
 chrome.runtime.onMessage.addListener((message: PopupToContentMessage) => {
-  if (message.type !== "RUN_PAGE_DISCOVERY_NOW" || !initialized || !userContext) {
+  if (!initialized || !userContext) {
     return;
   }
 
-  discoveryStarted = true;
-  void runPathB();
+  if (message.type === "RUN_PAGE_DISCOVERY_NOW") {
+    discoveryStarted = true;
+    void runPathB();
+    return;
+  }
+
+  if (message.type === "REFRESH_REPLACEMENTS") {
+    console.log("[GlossPlusOne:content] Refresh replacements requested");
+    clearOutput(document);
+    void runPathA();
+    return;
+  }
 });
 
 function listenForBankAndRender(): void {

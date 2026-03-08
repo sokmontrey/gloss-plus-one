@@ -150,6 +150,10 @@ export interface RunPageDiscoveryNowMessage {
   type: "RUN_PAGE_DISCOVERY_NOW";
 }
 
+export interface RefreshReplacementsMessage {
+  type: "REFRESH_REPLACEMENTS";
+}
+
 export interface CurrentPageStatus {
   url: string;
   disabled: boolean;
@@ -170,7 +174,10 @@ export type ContentToBackgroundMessage =
   | ReportPageSignalMessage
   | AddPhraseToBankMessage;
 
-export type PopupToContentMessage = GetPageStatusMessage | RunPageDiscoveryNowMessage;
+export type PopupToContentMessage =
+  | GetPageStatusMessage
+  | RunPageDiscoveryNowMessage
+  | RefreshReplacementsMessage;
 
 /** Single replacement target: one phrase within a paragraph identified by domPath. */
 export interface ReplacementInstruction {

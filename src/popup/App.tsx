@@ -140,6 +140,19 @@ async function triggerDiscoveryOnActiveTab(): Promise<void> {
   }
 }
 
+async function triggerReplacementRefreshOnActiveTab(): Promise<void> {
+  const tab = await getActiveTab();
+  if (typeof tab?.id !== "number") {
+    return;
+  }
+
+  try {
+    await chrome.tabs.sendMessage(tab.id, { type: "REFRESH_REPLACEMENTS" });
+  } catch (error) {
+    console.warn("[GlossPlusOne:popup] Failed to refresh replacements on active tab", error);
+  }
+}
+
 async function getCurrentPageStatus(): Promise<PageControlState> {
   const tab = await getActiveTab();
   const url = typeof tab?.url === "string" ? tab.url : null;
@@ -177,6 +190,7 @@ export default function App() {
     profile: null,
   });
   const [isPlanning, setIsPlanning] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
   const [pageControl, setPageControl] = useState<PageControlState>({
     status: "loading",
@@ -350,6 +364,16 @@ export default function App() {
     }
   };
 
+  const handleRefreshReplacements = async () => {
+    if (pageControl.status !== "ready" || pageControl.disabled || isRefreshing) {
+      return;
+    }
+
+    setIsRefreshing(true);
+    await triggerReplacementRefreshOnActiveTab();
+    window.setTimeout(() => setIsRefreshing(false), 1000);
+  };
+
   const handleResetLanguageConfirm = async () => {
     const language = state.targetLanguage;
     setShowResetConfirm(false);
@@ -432,6 +456,15 @@ export default function App() {
                 : pageControl.disabled
                   ? "Enable on this page"
                   : "Pause on this page"}
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => void handleRefreshReplacements()}
+              disabled={pageControl.disabled || isRefreshing}
+              className="mt-2 w-full justify-center"
+            >
+              {isRefreshing ? "Refreshing..." : "Refresh replacements"}
             </Button>
           </>
         ) : (
