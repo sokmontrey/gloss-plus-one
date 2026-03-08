@@ -60,10 +60,16 @@ function SelectContent({
   children,
   position = "item-aligned",
   align = "center",
+  portalContainer,
   ...props
-}: React.ComponentProps<typeof SelectPrimitive.Content>) {
+}: React.ComponentProps<typeof SelectPrimitive.Content> & {
+  /** Render dropdown into this element (fixes portaled select in Chrome extension popups). Pass a ref so the container is read when the dropdown opens. */
+  portalContainer?: HTMLElement | null | React.RefObject<HTMLElement | null>;
+}) {
+  const container =
+    portalContainer && "current" in portalContainer ? portalContainer.current : portalContainer;
   return (
-    <SelectPrimitive.Portal>
+    <SelectPrimitive.Portal container={container ?? undefined}>
       <SelectPrimitive.Content
         data-slot="select-content"
         data-align-trigger={position === "item-aligned"}

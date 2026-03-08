@@ -2,13 +2,6 @@ import { useEffect, useMemo, useState } from "react";
 import { ExternalLink, Minus, Plus, RotateCcw } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { Slider } from "@/components/ui/slider";
 import { SUPPORTED_TARGET_LANGUAGES, TARGET_LANGUAGE_LABELS } from "@/shared/languages";
 import {
@@ -429,21 +422,18 @@ export default function App() {
             <p className="text-xs font-medium">Learning Language</p>
             <p className="text-[11px] text-muted-foreground">Switch banks and page replacements instantly</p>
           </div>
-          <Select
+          <select
             value={state.targetLanguage}
-            onValueChange={(value) => void handleLanguageChange(value as UserContext["targetLanguage"])}
+            onChange={(event) => void handleLanguageChange(event.target.value as UserContext["targetLanguage"])}
+            className="h-8 w-[140px] rounded-md border border-input bg-input/20 px-2 text-xs outline-none transition-colors focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30"
+            aria-label="Select learning language"
           >
-            <SelectTrigger className="w-[140px] h-8 text-xs">
-              <SelectValue placeholder="Select language" />
-            </SelectTrigger>
-            <SelectContent>
-              {SUPPORTED_TARGET_LANGUAGES.map((language) => (
-                <SelectItem key={language} value={language} className="text-xs">
-                  {TARGET_LANGUAGE_LABELS[language]}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+            {SUPPORTED_TARGET_LANGUAGES.map((language) => (
+              <option key={language} value={language}>
+                {TARGET_LANGUAGE_LABELS[language]}
+              </option>
+            ))}
+          </select>
         </div>
       </section>
 
