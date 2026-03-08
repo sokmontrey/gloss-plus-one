@@ -174,31 +174,50 @@ export default function Dashboard() {
         </section>
 
         {/* Seen words — flat list, newest first */}
-        <section>
+        <section className="min-w-0">
           <h2 className="mb-3 text-sm font-medium text-foreground">Seen words</h2>
           {seenPhrases.length === 0 ? (
             <p className="rounded-lg border border-dashed border-border bg-muted/20 py-12 text-center text-sm text-muted-foreground">
               No learned phrases yet. Browse with the extension on to build your list.
             </p>
           ) : (
-            <ul className="space-y-2">
+            <div className="overflow-x-auto">
+              <div
+                className="grid min-w-lg grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)_auto_auto_auto_5rem] items-center gap-x-3 px-4 pb-1.5 text-xs font-medium text-muted-foreground"
+                aria-hidden
+              >
+                <span>Phrase</span>
+                <span />
+                <span>Translation</span>
+                <span className="w-9 text-center">Conf.</span>
+                <span>Type</span>
+                <span>Stats</span>
+                <span className="w-20" />
+              </div>
+              <ul className="space-y-2">
               {seenPhrases.map((p, i) => (
                 <li
                   key={`${p.phrase}-${p.targetLanguage}-${i}`}
-                  className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border border-border bg-card px-4 py-2.5 text-sm"
+                  className="grid min-w-lg grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)_auto_auto_auto_5rem] items-center gap-x-3 rounded-lg border border-border bg-card px-4 py-2.5 text-sm"
                 >
-                  <span className="font-medium">{p.phrase}</span>
-                  <span className="text-muted-foreground">→</span>
-                  <span className="text-muted-foreground">{p.targetPhrase}</span>
-                  <Badge variant={confidenceVariant(p.confidence)} className="ml-auto">
+                  <span className="min-w-0 truncate font-medium" title={p.phrase}>
+                    {p.phrase}
+                  </span>
+                  <span className="shrink-0 text-muted-foreground" aria-hidden>→</span>
+                  <span className="min-w-0 truncate text-muted-foreground" title={p.targetPhrase}>
+                    {p.targetPhrase}
+                  </span>
+                  <Badge variant={confidenceVariant(p.confidence)} className="shrink-0 w-9 justify-center">
                     {(p.confidence * 100).toFixed(0)}%
                   </Badge>
-                  <Badge variant="outline">{p.phraseType}</Badge>
-                  <span className="text-xs text-muted-foreground">
+                  <Badge variant="outline" className="shrink-0">
+                    {p.phraseType}
+                  </Badge>
+                  <span className="shrink-0 text-xs text-muted-foreground tabular-nums">
                     {p.exposures} exp · {p.reveals} rev
                   </span>
                   <div
-                    className="h-1.5 w-20 overflow-hidden rounded-full bg-muted"
+                    className="h-1.5 w-20 min-w-20 shrink-0 overflow-hidden rounded-full bg-muted"
                     role="progressbar"
                     aria-valuenow={p.confidence * 100}
                     aria-valuemin={0}
@@ -211,7 +230,8 @@ export default function Dashboard() {
                   </div>
                 </li>
               ))}
-            </ul>
+              </ul>
+            </div>
           )}
         </section>
       </div>
