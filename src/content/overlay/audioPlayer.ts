@@ -9,6 +9,7 @@ const LANG_MAP: Record<string, string> = {
 let currentText = "";
 let currentLanguage = "es";
 let activeUtterance: SpeechSynthesisUtterance | null = null;
+let preferredLanguage = "es";
 
 function getSpeechSynthesis(): SpeechSynthesis | null {
   return typeof window !== "undefined" && "speechSynthesis" in window
@@ -18,6 +19,10 @@ function getSpeechSynthesis(): SpeechSynthesis | null {
 
 function getLanguageTag(language: string): string {
   return LANG_MAP[language] ?? "es-ES";
+}
+
+export function setPreferredLanguage(language: string): void {
+  preferredLanguage = language;
 }
 
 function pickVoice(synth: SpeechSynthesis, language: string): SpeechSynthesisVoice | null {
@@ -55,6 +60,7 @@ export function requestAndPlay(
   stopPlaying();
   currentText = normalizedText;
   currentLanguage = language;
+  preferredLanguage = language;
 
   const utterance = new SpeechSynthesisUtterance(normalizedText);
   utterance.lang = getLanguageTag(language);
@@ -72,12 +78,12 @@ export function requestAndPlay(
   utterance.onstart = () => onLoadEnd?.();
   utterance.onend = () => {
     currentText = "";
-    currentLanguage = "es";
+    currentLanguage = preferredLanguage;
     activeUtterance = null;
   };
   utterance.onerror = () => {
     currentText = "";
-    currentLanguage = "es";
+    currentLanguage = preferredLanguage;
     activeUtterance = null;
     onLoadEnd?.();
   };
@@ -122,10 +128,10 @@ export function stopPlaying(): void {
   const synth = getSpeechSynthesis();
   synth?.cancel();
   currentText = "";
-  currentLanguage = "es";
+  currentLanguage = preferredLanguage;
   activeUtterance = null;
 }
 
 export function playAudio(_dataUri: string, text: string): void {
-  requestAndPlay(text, "es");
+  requestAndPlay(text, preferredLanguage);
 }

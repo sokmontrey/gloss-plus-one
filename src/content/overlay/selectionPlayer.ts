@@ -1,4 +1,4 @@
-import { isPlaying, requestAndPlay, stopPlaying } from "./audioPlayer";
+import { isPlaying, requestAndPlay, setPreferredLanguage, stopPlaying } from "./audioPlayer";
 
 const MIN_CHARS = 2;
 const MAX_CHARS = 60;
@@ -183,6 +183,7 @@ function showSelectionPlayer(text: string, language: string, selection: Selectio
 
 export function initSelectionPlayer(language: string): void {
   currentLanguage = language;
+  setPreferredLanguage(language);
 
   if (listenersBound) {
     return;
