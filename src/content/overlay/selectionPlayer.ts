@@ -107,7 +107,15 @@ function showSelectionPlayer(text: string, language: string, selection: Selectio
 
   playButton.addEventListener("click", () => {
     const label = playButton.querySelector("span");
+    console.log("[GlossPlusOne:selection] Selection TTS clicked", {
+      text,
+      language,
+      displayText,
+      currentlyPlaying: isPlaying(),
+    });
+
     if (isPlaying()) {
+      console.log("[GlossPlusOne:selection] Stopping active TTS from selection player");
       stopPlaying();
       hideSelectionPlayer();
       return;
@@ -184,6 +192,10 @@ function showSelectionPlayer(text: string, language: string, selection: Selectio
 export function initSelectionPlayer(language: string): void {
   currentLanguage = language;
   setPreferredLanguage(language);
+  console.log("[GlossPlusOne:selection] initSelectionPlayer", {
+    language,
+    listenersBound,
+  });
 
   if (listenersBound) {
     return;

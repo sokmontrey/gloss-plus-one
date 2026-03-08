@@ -121,7 +121,15 @@ function createTooltipEl(): HTMLElement {
     const language = activeSpan?.getAttribute("data-gloss-language") ?? button.getAttribute("data-language") ?? "es";
     const label = button.querySelector("#gloss-speaker-label");
 
+    console.log("[GlossPlusOne:tooltip] Speaker button clicked", {
+      pronunciation,
+      language,
+      hasActiveSpan: Boolean(activeSpan),
+      activePhraseId: activeSpan?.getAttribute("data-gloss-phrase-id") ?? null,
+    });
+
     if (isPlaying()) {
+      console.log("[GlossPlusOne:tooltip] Stopping active TTS from tooltip");
       stopPlaying();
       if (label instanceof HTMLElement) {
         label.textContent = "Listen";

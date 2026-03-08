@@ -392,18 +392,8 @@ function hashUrl(url: string): string {
   }
 }
 
-function hashPageContent(pageText: string): string {
-  const normalized = pageText
-    .toLowerCase()
-    .replace(/\s+/g, " ")
-    .trim();
-
-  let hash = 0;
-  for (let index = 0; index < normalized.length; index += 1) {
-    hash = (hash * 31 + normalized.charCodeAt(index)) >>> 0;
-  }
-
-  return hash.toString(36);
+function getProcessedPageKey(url: string, tier: number): string {
+  return `${hashUrl(url)}::tier=${tier}`;
 }
 
 export async function runPageDiscovery(
@@ -412,19 +402,22 @@ export async function runPageDiscovery(
   pageUrl: string,
   language: string,
 ): Promise<void> {
-  const urlHash = hashUrl(pageUrl);
-  const contentHash = hashPageContent(pageText);
-  const processedKey = `${urlHash}::${contentHash}`;
-  const processed = await getProcessedUrls(language);
-  if (processed.has(processedKey)) {
-    console.log("[GlossPlusOne:planner] URL + content already processed, skipping");
-    return;
-  }
-
   const [bank, userContext] = await Promise.all([
     getPhraseBank(language),
     getUserContext(),
   ]);
+  const processedKey = getProcessedPageKey(pageUrl, bank.currentTier);
+  const processed = await getProcessedUrls(language);
+  if (processed.has(processedKey)) {
+    console.log("[GlossPlusOne:planner] URL already processed for current tier, skipping", {
+      processedKey,
+      pageUrl,
+      tier: bank.currentTier,
+      language,
+    });
+    return;
+  }
+
   const existingPhrases = bank.phrases.map((phrase) => normalizePhraseKey(phrase.phrase));
   const existingSet = new Set(existingPhrases);
   const effectiveBand = getTierCefrBand(bank.currentTier, userContext.cefrBand);
