@@ -2,6 +2,15 @@ import { useEffect, useMemo, useState } from "react";
 import { Minus, Plus } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Slider } from "@/components/ui/slider";
 import { SUPPORTED_TARGET_LANGUAGES, TARGET_LANGUAGE_LABELS } from "@/shared/languages";
 import { BANK_KEY, getPhraseBankFromSnapshot } from "@/shared/phraseBankStorage";
 import type { BankPhrase, PhraseBank, ProgressionConfig, UserContext } from "@/shared/types";
@@ -140,9 +149,9 @@ export default function Dashboard() {
             {state.bank?.currentTier ?? 1}
           </p>
         </div>
-        <div className="flex items-center gap-3">
-          <Badge variant="secondary" className="px-3 py-1 text-sm shadow-sm">
-            Assessment Score: <span className="ml-1.5 font-bold text-primary">{state.assessmentScore}</span>
+        <div className="flex items-center gap-3 shadow-md">
+          <Badge variant="default" className="px-5 py-2 text-sm font-bold shadow-sm ring-2 ring-primary/20">
+            Assessment Score: <span className="ml-1.5 text-primary-foreground">{state.assessmentScore}</span>
           </Badge>
         </div>
       </header>
@@ -155,17 +164,21 @@ export default function Dashboard() {
                 <h2 className="text-sm font-medium">Learning Language</h2>
                 <p className="text-xs text-muted-foreground">Swap phrase banks and live page replacements</p>
               </div>
-              <select
+              <Select
                 value={state.targetLanguage}
-                onChange={(event) => void handleLanguageChange(event.target.value as UserContext["targetLanguage"])}
-                className="h-9 rounded-md border border-border bg-background px-3 text-sm text-foreground"
+                onValueChange={(value) => void handleLanguageChange(value as UserContext["targetLanguage"])}
               >
-                {SUPPORTED_TARGET_LANGUAGES.map((language) => (
-                  <option key={language} value={language}>
-                    {TARGET_LANGUAGE_LABELS[language]}
-                  </option>
-                ))}
-              </select>
+                <SelectTrigger className="w-[180px] h-9">
+                  <SelectValue placeholder="Select language" />
+                </SelectTrigger>
+                <SelectContent>
+                  {SUPPORTED_TARGET_LANGUAGES.map((language) => (
+                    <SelectItem key={language} value={language}>
+                      {TARGET_LANGUAGE_LABELS[language]}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
           </div>
 
@@ -203,83 +216,96 @@ export default function Dashboard() {
               </div>
               <Badge variant="outline">{Math.round(state.config.progressionThreshold * 100)}%</Badge>
             </div>
-            <input
-              type="range"
+            <Slider
               min={1}
               max={5}
               step={1}
-              value={sliderValue}
-              onChange={(event) => void handleThresholdChange(Number(event.target.value))}
-              className="mt-4 h-2 w-full accent-primary"
+              value={[sliderValue]}
+              onValueChange={(values) => void handleThresholdChange(values[0])}
+              className="mt-5"
             />
           </div>
         </section>
 
-        <section>
-          <div className="mb-3 flex items-center justify-between">
-            <h2 className="text-sm font-medium">Phrase Bank</h2>
-            <span className="text-xs text-muted-foreground">
-              Latest batch: {state.bank?.lastBatchId ? state.bank.lastBatchId.slice(0, 8) : "none"}
-            </span>
-          </div>
-          {phrases.length === 0 ? (
-            <p className="rounded-lg border border-dashed border-border bg-muted/20 py-12 text-center text-sm text-muted-foreground">
-              No phrases yet. Use the + button to trigger the planner and seed the bank.
-            </p>
-          ) : (
-            <div className="space-y-2">
-              {phrases.map((phrase) => (
-                <div
-                  key={phrase.id}
-                  className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto_auto_auto] items-center gap-3 rounded-lg border border-border bg-card px-4 py-3 text-sm"
-                >
-                  <div className="min-w-0">
-                    <div className="truncate font-medium" title={phrase.phrase}>
-                      {phrase.phrase}
-                    </div>
-                    <div className="text-xs text-muted-foreground">
-                      Tier {phrase.tier} · {phrase.targetLanguage.toUpperCase()}
-                    </div>
-                  </div>
-                  <div className="min-w-0 truncate text-muted-foreground" title={phrase.targetPhrase}>
-                    {phrase.targetPhrase}
-                  </div>
-                  <Badge variant={confidenceVariant(phrase.confidence)} className="w-12 justify-center">
-                    {Math.round(phrase.confidence * 100)}%
-                  </Badge>
-                  <Badge variant="outline">{phrase.phraseType}</Badge>
-                  <div className="text-right text-xs text-muted-foreground">
-                    {phrase.exposures} exp · {phrase.hoverCount} hover
-                  </div>
-                </div>
-              ))}
+        <div className="grid gap-6 md:grid-cols-2">
+          {/* Phrase Bank List */}
+          <section className="flex flex-col h-[550px]">
+            <div className="mb-3 flex items-center justify-between">
+              <h2 className="text-sm font-medium">Phrase Bank</h2>
+              <span className="text-xs text-muted-foreground">
+                Latest batch: {state.bank?.lastBatchId ? state.bank.lastBatchId.slice(0, 8) : "none"}
+              </span>
             </div>
-          )}
-        </section>
-
-        {state.assessmentHistory && state.assessmentHistory.length > 0 && (
-          <section className="mt-8">
-            <h2 className="mb-3 text-sm font-medium">Assessment History</h2>
-            <div className="space-y-2">
-              {state.assessmentHistory.map((entry) => (
-                <div key={entry.id} className="rounded-lg border border-border bg-card p-4">
-                  <div className="flex items-center justify-between gap-4">
-                    <div className="font-medium">"{entry.phrase}"</div>
-                    <Badge variant={entry.score >= 4 ? "success" : entry.score >= 2 ? "warning" : "muted"}>
-                      {entry.score}/5
-                    </Badge>
-                  </div>
-                  <div className="mt-2 text-sm text-muted-foreground">
-                    <span className="opacity-70">Translation attempt:</span> "{entry.userTranslation}"
-                  </div>
-                  <div className="mt-1 text-xs text-muted-foreground/50">
-                    {new Date(entry.timestamp).toLocaleString()}
-                  </div>
-                </div>
-              ))}
-            </div>
+            
+            <ScrollArea className="flex-1 rounded-md border border-border bg-muted/10">
+              <div className="p-4 space-y-2">
+                {phrases.length === 0 ? (
+                  <p className="rounded-lg border border-dashed border-border bg-muted/20 py-12 text-center text-sm text-muted-foreground">
+                    No phrases yet. Use the + button to trigger the planner and seed the bank.
+                  </p>
+                ) : (
+                  phrases.map((phrase) => (
+                    <div
+                      key={phrase.id}
+                      className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto_auto_auto] items-center gap-3 rounded-lg border border-border bg-card px-4 py-3 text-sm"
+                    >
+                      <div className="min-w-0">
+                        <div className="truncate font-medium" title={phrase.phrase}>
+                          {phrase.phrase}
+                        </div>
+                        <div className="text-xs text-muted-foreground">
+                          Tier {phrase.tier} · {phrase.targetLanguage.toUpperCase()}
+                        </div>
+                      </div>
+                      <div className="min-w-0 truncate text-muted-foreground" title={phrase.targetPhrase}>
+                        {phrase.targetPhrase}
+                      </div>
+                      <Badge variant={confidenceVariant(phrase.confidence)} className="w-12 justify-center">
+                        {Math.round(phrase.confidence * 100)}%
+                      </Badge>
+                      <Badge variant="outline">{phrase.phraseType}</Badge>
+                      <div className="text-right text-xs text-muted-foreground hidden sm:block">
+                        {phrase.exposures} exp
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </ScrollArea>
           </section>
-        )}
+
+          {/* Assessment History List */}
+          {state.assessmentHistory && state.assessmentHistory.length > 0 && (
+            <section className="flex flex-col h-[550px]">
+              <div className="mb-3 flex items-center justify-between">
+                <h2 className="text-sm font-medium">Assessment History</h2>
+                <span className="text-xs text-muted-foreground">
+                  {state.assessmentHistory.length} records
+                </span>
+              </div>
+              <ScrollArea className="flex-1 rounded-md border border-border bg-muted/10">
+                <div className="p-4 space-y-2">
+                  {state.assessmentHistory.map((entry) => (
+                    <div key={entry.id} className="rounded-lg border border-border bg-card p-4 shadow-sm">
+                      <div className="flex items-center justify-between gap-4">
+                        <div className="font-medium text-[15px]">"{entry.phrase}"</div>
+                        <Badge variant={entry.score >= 4 ? "default" : entry.score >= 2 ? "warning" : "muted"}>
+                          {entry.score}/5
+                        </Badge>
+                      </div>
+                      <div className="mt-2 text-sm text-muted-foreground">
+                        <span className="opacity-70">Translation attempt:</span> "{entry.userTranslation}"
+                      </div>
+                      <div className="mt-2 text-xs text-muted-foreground/50 text-right">
+                        {new Date(entry.timestamp).toLocaleString()}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </ScrollArea>
+            </section>
+          )}
+        </div>
       </div>
     </div>
   );

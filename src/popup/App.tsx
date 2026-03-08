@@ -2,6 +2,14 @@ import { useEffect, useMemo, useState } from "react";
 import { ExternalLink, Minus, Plus, RotateCcw } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Slider } from "@/components/ui/slider";
 import { SUPPORTED_TARGET_LANGUAGES, TARGET_LANGUAGE_LABELS } from "@/shared/languages";
 import {
   DISABLED_PAGES_KEY,
@@ -409,8 +417,8 @@ export default function App() {
           </p>
         </div>
         {state.assessmentScore > 0 && (
-          <Badge variant="secondary" className="px-2 shadow-sm text-[10px]">
-            Score: <span className="ml-1 text-primary">{state.assessmentScore}</span>
+          <Badge variant="default" className="px-3 py-1 shadow-md text-xs font-bold ring-2 ring-primary/20">
+            Score: <span className="ml-1 text-primary-foreground">{state.assessmentScore}</span>
           </Badge>
         )}
       </div>
@@ -421,17 +429,21 @@ export default function App() {
             <p className="text-xs font-medium">Learning Language</p>
             <p className="text-[11px] text-muted-foreground">Switch banks and page replacements instantly</p>
           </div>
-          <select
+          <Select
             value={state.targetLanguage}
-            onChange={(event) => void handleLanguageChange(event.target.value as UserContext["targetLanguage"])}
-            className="h-8 rounded-md border border-border bg-background px-2 text-xs text-foreground"
+            onValueChange={(value) => void handleLanguageChange(value as UserContext["targetLanguage"])}
           >
-            {SUPPORTED_TARGET_LANGUAGES.map((language) => (
-              <option key={language} value={language}>
-                {TARGET_LANGUAGE_LABELS[language]}
-              </option>
-            ))}
-          </select>
+            <SelectTrigger className="w-[140px] h-8 text-xs">
+              <SelectValue placeholder="Select language" />
+            </SelectTrigger>
+            <SelectContent>
+              {SUPPORTED_TARGET_LANGUAGES.map((language) => (
+                <SelectItem key={language} value={language} className="text-xs">
+                  {TARGET_LANGUAGE_LABELS[language]}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
       </section>
 
@@ -572,14 +584,13 @@ export default function App() {
           </div>
           <Badge variant="outline">{Math.round(state.config.progressionThreshold * 100)}%</Badge>
         </div>
-        <input
-          type="range"
+        <Slider
           min={1}
           max={5}
           step={1}
-          value={sliderValue}
-          onChange={(event) => void handleThresholdChange(Number(event.target.value))}
-          className="mt-3 h-2 w-full accent-primary"
+          value={[sliderValue]}
+          onValueChange={(values) => void handleThresholdChange(values[0])}
+          className="mt-4"
         />
       </section>
 
