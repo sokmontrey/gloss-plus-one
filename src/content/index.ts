@@ -7,7 +7,7 @@ import { initSelectionPlayer } from "./overlay/selectionPlayer";
 import { isPageDisabled } from "@/shared/pageDisable";
 import { BANK_KEY, getPhraseBankFromSnapshot } from "@/shared/phraseBankStorage";
 import { getActivePhrases } from "@/shared/structuralPhrases";
-import type { ReplacementInstruction } from "@/shared/messages";
+import type { PopupToContentMessage, ReplacementInstruction } from "@/shared/messages";
 import type { BankPhrase, UserContext } from "@/shared/types";
 
 injectOutputStyles(document);
@@ -186,10 +186,10 @@ function startPathB(): void {
 async function runPathB(): Promise<void> {
   const pageContent = enrichPageContent();
   const pageText = pageContent.paragraphs
-    .slice(0, 6)
     .map((paragraph) => paragraph.text)
     .join(" ")
-    .slice(0, 800);
+    .replace(/\s+/g, " ")
+    .trim();
 
   if (pageText.length < 100) {
     return;
@@ -205,6 +205,15 @@ async function runPathB(): Promise<void> {
     },
   });
 }
+
+chrome.runtime.onMessage.addListener((message: PopupToContentMessage) => {
+  if (message.type !== "RUN_PAGE_DISCOVERY_NOW" || !initialized || !userContext) {
+    return;
+  }
+
+  discoveryStarted = true;
+  void runPathB();
+});
 
 function listenForBankAndRender(): void {
   const handler = (

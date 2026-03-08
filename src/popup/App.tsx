@@ -127,6 +127,19 @@ async function reloadActiveTab(): Promise<void> {
   await chrome.tabs.reload(tab.id);
 }
 
+async function triggerDiscoveryOnActiveTab(): Promise<void> {
+  const tab = await getActiveTab();
+  if (typeof tab?.id !== "number") {
+    return;
+  }
+
+  try {
+    await chrome.tabs.sendMessage(tab.id, { type: "RUN_PAGE_DISCOVERY_NOW" });
+  } catch (error) {
+    console.warn("[GlossPlusOne:popup] Failed to trigger discovery on active tab", error);
+  }
+}
+
 async function getCurrentPageStatus(): Promise<PageControlState> {
   const tab = await getActiveTab();
   const url = typeof tab?.url === "string" ? tab.url : null;
@@ -239,15 +252,17 @@ export default function App() {
       setIsPlanning(true);
       const language = state.targetLanguage;
 
-      chrome.runtime.sendMessage({
+      await chrome.runtime.sendMessage({
         type: "ENSURE_STRUCTURAL_TRANSLATIONS",
         payload: { language },
       });
 
-      chrome.runtime.sendMessage({
+      await chrome.runtime.sendMessage({
         type: "TRIGGER_PLANNER",
         payload: { reason: "debug_increment", language },
       });
+
+      await triggerDiscoveryOnActiveTab();
 
       window.setTimeout(() => {
         setIsPlanning(false);

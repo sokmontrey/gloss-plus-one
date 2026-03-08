@@ -49,6 +49,14 @@ export async function callGroq(prompt: string, responseMimeType = "application/j
     const message = firstChoice && isRecord(firstChoice.message) ? firstChoice.message : undefined;
     const text = message && typeof message.content === "string" ? message.content : undefined;
 
+    if (
+      firstChoice?.finish_reason &&
+      (firstChoice.finish_reason === "length" || firstChoice.finish_reason === "content_filter")
+    ) {
+      console.warn(`[GlossPlusOne:groq] Interrupted generation: ${firstChoice.finish_reason}`);
+      throw new Error(`GROQ_INTERRUPTED: ${firstChoice.finish_reason}`);
+    }
+
     if (!text) {
       console.error("[GlossPlusOne:groq] Empty response:", data);
       throw new Error("GROQ_EMPTY_RESPONSE");

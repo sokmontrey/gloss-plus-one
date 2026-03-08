@@ -55,6 +55,14 @@ export async function callGemini(
     const firstPart = Array.isArray(rawParts) && rawParts.length > 0 && isRecord(rawParts[0]) ? rawParts[0] : undefined;
     const text = typeof firstPart?.text === "string" ? firstPart.text : undefined;
 
+    if (
+      firstCandidate?.finishReason &&
+      firstCandidate.finishReason !== "STOP"
+    ) {
+      console.warn(`[GlossPlusOne:gemini] Interrupted generation: ${firstCandidate.finishReason}`);
+      throw new Error(`GEMINI_INTERRUPTED: ${firstCandidate.finishReason}`);
+    }
+
     if (!text) {
       throw new Error("GEMINI_EMPTY_RESPONSE");
     }

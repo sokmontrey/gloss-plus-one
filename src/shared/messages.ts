@@ -146,6 +146,10 @@ export interface GetPageStatusMessage {
   type: "GET_PAGE_STATUS";
 }
 
+export interface RunPageDiscoveryNowMessage {
+  type: "RUN_PAGE_DISCOVERY_NOW";
+}
+
 export interface CurrentPageStatus {
   url: string;
   disabled: boolean;
@@ -166,7 +170,7 @@ export type ContentToBackgroundMessage =
   | ReportPageSignalMessage
   | AddPhraseToBankMessage;
 
-export type PopupToContentMessage = GetPageStatusMessage;
+export type PopupToContentMessage = GetPageStatusMessage | RunPageDiscoveryNowMessage;
 
 /** Single replacement target: one phrase within a paragraph identified by domPath. */
 export interface ReplacementInstruction {

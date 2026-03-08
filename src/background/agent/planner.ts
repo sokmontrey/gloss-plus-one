@@ -9,6 +9,8 @@ import type { BankPhrase, UserContext } from "@/shared/types";
 const PROCESSED_URLS_KEY = "glossProcessedUrls";
 const MAX_DISCOVERY_URLS = 500;
 const MAX_TIER = 6;
+/** Max page text length sent to the LLM; avoids overload and single-phrase responses. */
+const PAGE_DISCOVERY_PROMPT_MAX_CHARS = 6_000;
 
 function normalizePhrase(value: string): string {
   return value.replace(/\s+/g, " ").trim();
@@ -394,8 +396,7 @@ function hashPageContent(pageText: string): string {
   const normalized = pageText
     .toLowerCase()
     .replace(/\s+/g, " ")
-    .trim()
-    .slice(0, 800);
+    .trim();
 
   let hash = 0;
   for (let index = 0; index < normalized.length; index += 1) {
@@ -429,6 +430,12 @@ export async function runPageDiscovery(
   const effectiveBand = getTierCefrBand(bank.currentTier, userContext.cefrBand);
   const nextBand = getTierCefrBand(Math.min(bank.currentTier + 1, MAX_TIER), userContext.cefrBand);
 
+  const excerpt = pageText.slice(0, PAGE_DISCOVERY_PROMPT_MAX_CHARS);
+  const truncatedNote =
+    pageText.length > PAGE_DISCOVERY_PROMPT_MAX_CHARS
+      ? ` (excerpt: first ${PAGE_DISCOVERY_PROMPT_MAX_CHARS} chars of ${pageText.length} total)`
+      : "";
+
   const prompt = `You are a language teacher selecting vocabulary for a ${userContext.cefrBand} learner.
 Native language: ${userContext.nativeLanguage}
 Target language: ${language}
@@ -436,13 +443,13 @@ Current discovery tier: ${bank.currentTier} (${effectiveBand})
 Target difficulty for new discoveries: approximately i+1 (${nextBand})
 
 Page title: "${pageTitle}"
-Page content excerpt:
-"${pageText.slice(0, 800)}"
+Page content${truncatedNote}:
+"${excerpt}"
 
 Phrases already in the learner's bank (DO NOT repeat these):
 ${existingPhrases.slice(-40).map((phrase) => `"${phrase}"`).join(", ")}
 
-Select 5-8 phrases from this specific page content that are:
+Select exactly 5 to 8 phrases from the page content above. You must return at least 5 phrases unless the excerpt contains fewer than 5 suitable candidates. Each phrase must be:
 - Worth learning at approximately one step above the current bank (${nextBand})
 - Actually present in the text above (or close variants)
 - Not already in the bank list above
@@ -457,17 +464,15 @@ Avoid random niche vocabulary, proper nouns, fragmented text, or phrases that ar
 Prefer phrases that make sense as the learner's next step from the current bank.
 If possible, return mostly structural phrases and mark them with "phraseType": "structural".
 
-Return a JSON array and nothing else. Start with [.
+Return a JSON array only. No markdown, no explanation. Start with [. Include 5-8 objects.
 [
-  {
-    "phrase": "raises concerns",
-    "targetPhrase": "soulève des préoccupations",
-    "phraseType": "lexical"
-  }
+  { "phrase": "raises concerns", "targetPhrase": "soulève des préoccupations", "phraseType": "lexical" },
+  { "phrase": "for example", "targetPhrase": "par exemple", "phraseType": "structural" }
 ]`;
 
   try {
     const raw = await callPlannerLLM(prompt);
+    console.log("[GlossPlusOne:planner] Page discovery raw response:", raw);
     const parsed = parseJsonResponse(raw) as Array<{
       phrase: string;
       targetPhrase: string;
