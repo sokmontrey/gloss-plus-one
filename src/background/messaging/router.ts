@@ -3,7 +3,6 @@ import {
   clearProcessedUrls,
   ensureStructuralTranslations,
   extractPageTopic,
-  parseJsonResponse,
   runPageDiscovery,
   runPlanner,
 } from "@/background/agent/planner";
@@ -24,49 +23,57 @@ import {
   recordPageSignal,
 } from "@/background/memory/pageSignalStore";
 import { getUserContext } from "@/background/memory/store";
+import { STRUCTURAL_PHRASES } from "@/shared/structuralPhrases";
 import type { BackgroundToContentMessage, ContentToBackgroundMessage } from "@/shared/messages";
 import type { BankPhrase } from "@/shared/types";
 
-async function callStructuredTranslationLLM(prompt: string): Promise<string> {
+async function callStructuredTranslationLLM(
+  prompt: string,
+  responseMimeType = "application/json",
+): Promise<string> {
   try {
-    return await callGemini(prompt, "application/json");
+    return await callGemini(prompt, responseMimeType);
   } catch (error) {
     console.warn("[GlossPlusOne:router] Gemini translation failed, trying Groq:", error);
   }
 
-  return await callGroq(prompt, "application/json");
+  return await callGroq(prompt, responseMimeType);
 }
 
-function parseAddPhraseResponse(raw: string): {
-  targetPhrase: string;
-  phraseType: "structural" | "lexical";
-  tier: number;
-} {
-  const payload = parseJsonResponse(raw);
-  const candidate = Array.isArray(payload) ? payload[0] : payload;
-  if (!candidate || typeof candidate !== "object") {
-    throw new Error("ADD_PHRASE_PARSE_FAILED");
-  }
+function normalizeSelectedPhrase(value: string): string {
+  return value
+    .replace(/\s+/g, " ")
+    .replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, "")
+    .trim();
+}
 
-  const parsed = candidate as Record<string, unknown>;
-  const targetPhrase = typeof parsed.targetPhrase === "string"
-    ? parsed.targetPhrase.replace(/\s+/g, " ").trim()
-    : typeof parsed.translation === "string"
-      ? parsed.translation.replace(/\s+/g, " ").trim()
-      : "";
+function parsePlainTranslation(raw: string): string {
+  return raw
+    .replace(/```[\s\S]*?```/g, "")
+    .replace(/^["'`\s]+|["'`\s]+$/g, "")
+    .split("\n")[0]
+    .replace(/\s+/g, " ")
+    .trim();
+}
 
+async function translateSelectedPhrase(
+  phrase: string,
+  language: string,
+  nativeLanguage: string,
+): Promise<string> {
+  const prompt = `Translate this English phrase into ${language}.
+Native language context: ${nativeLanguage}
+Phrase: "${phrase}"
+
+Return only the translated phrase in ${language}.
+No JSON. No explanation. No quotes.`;
+
+  const raw = await callStructuredTranslationLLM(prompt, "text/plain");
+  const targetPhrase = parsePlainTranslation(raw);
   if (!targetPhrase) {
     throw new Error("ADD_PHRASE_TARGET_MISSING");
   }
-
-  return {
-    targetPhrase,
-    phraseType: parsed.phraseType === "lexical" ? "lexical" : "structural",
-    tier:
-      typeof parsed.tier === "number" && Number.isFinite(parsed.tier)
-        ? parsed.tier
-        : 1,
-  };
+  return targetPhrase;
 }
 
 export async function routeBackgroundMessage(
@@ -225,40 +232,43 @@ export async function routeBackgroundMessage(
 
     case "ADD_PHRASE_TO_BANK": {
       const { phrase, language, sourceUrl, sourceTitle } = message.payload;
-      const normalizedPhrase = phrase.replace(/\s+/g, " ").trim();
+      const normalizedPhrase = normalizeSelectedPhrase(phrase);
       const normalizedBankPhrase = normalizedPhrase.toLowerCase();
-      const userContext = await getUserContext();
-      const prompt = `Translate this phrase to ${language}.
-Native language: ${userContext.nativeLanguage}
-Phrase: "${normalizedPhrase}"
+      if (!normalizedBankPhrase) {
+        sendResponse({ success: false });
+        return true;
+      }
 
-Return a JSON object and nothing else. No markdown. No explanation.
-Required format:
-{"targetPhrase":"translation","phraseType":"structural|lexical","tier":1}`;
+      const bank = await getPhraseBank(language);
+      const existing = bank.phrases.find(
+        (entry) => entry.phrase.toLowerCase() === normalizedBankPhrase,
+      );
+      if (existing) {
+        sendResponse({ success: true, targetPhrase: existing.targetPhrase });
+        return true;
+      }
+
+      const userContext = await getUserContext();
+      const structural = STRUCTURAL_PHRASES.find(
+        (entry) => entry.phrase === normalizedBankPhrase,
+      );
 
       try {
-        const raw = await callStructuredTranslationLLM(prompt);
-        console.log("[GlossPlusOne:router] Raw add-phrase response:", raw);
-        const parsed = parseAddPhraseResponse(raw);
-
-        const bank = await getPhraseBank(language);
-        const existing = bank.phrases.find(
-          (entry) => entry.phrase.toLowerCase() === normalizedBankPhrase,
+        const targetPhrase = await translateSelectedPhrase(
+          normalizedPhrase,
+          language,
+          userContext.nativeLanguage,
         );
-        if (existing) {
-          sendResponse({ success: true, targetPhrase: existing.targetPhrase });
-          return true;
-        }
 
         const batchId = crypto.randomUUID();
         const newPhrase: BankPhrase = {
           id: crypto.randomUUID(),
           phrase: normalizedBankPhrase,
-          targetPhrase: parsed.targetPhrase,
+          targetPhrase,
           targetLanguage: language,
           nativeLanguage: userContext.nativeLanguage,
-          phraseType: parsed.phraseType,
-          tier: bank.currentTier,
+          phraseType: structural ? "structural" : "lexical",
+          tier: structural?.tier ?? bank.currentTier,
           addedAt: Date.now(),
           addedByBatch: batchId,
           confidence: 0,
