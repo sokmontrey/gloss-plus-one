@@ -4,8 +4,13 @@ import { resolveDomPath } from "./reader/domPath";
 import { withReadOnlyDomGuard } from "./reader/runtimeGuards";
 import { initSelectionPlayer } from "./overlay/selectionPlayer";
 import { initHoverListeners } from "./overlay/tooltipManager";
-import type { BackgroundToContentMessage, ReplacementInstruction, SerializableParagraph } from "@/shared/messages";
-import { applyOutputAndAnimate, injectOutputStyles } from "./output";
+import type {
+  BackgroundToContentMessage,
+  BankReadyReason,
+  ReplacementInstruction,
+  SerializableParagraph,
+} from "@/shared/messages";
+import { applyOutputAndAnimate, clearOutput, injectOutputStyles } from "./output";
 import type { BankPhrase, ProgressionConfig, UserContext } from "@/shared/types";
 import type { PageContent } from "./reader/types";
 
@@ -23,9 +28,13 @@ let hoverInitialized = false;
 let selectionInitialized = false;
 let initializingBadge: HTMLElement | null = null;
 let latestPageContext: Pick<PageContent, "url" | "title" | "domain" | "pageType"> | null = null;
+let currentTier = 1;
+let currentBatchId = "";
 
 const USER_CONTEXT_KEY = "userContext";
 const CONFIG_KEY = "glossProgressionConfig";
+const PROCESSED_SITE_LEVELS_KEY = "glossProcessedSiteLevels";
+const PROCESSED_SITE_LEVEL_SIGNALS_KEY = "glossProcessedSiteLevelSignals";
 const DEFAULT_USER_CONTEXT: Pick<UserContext, "targetLanguage" | "nativeLanguage"> = {
   targetLanguage: "es",
   nativeLanguage: "en",
@@ -131,10 +140,91 @@ async function getProgressionConfig(): Promise<ProgressionConfig> {
 }
 
 async function getBankPhrases(language: string): Promise<BankPhrase[]> {
-  return (await chrome.runtime.sendMessage({
+  const response = (await chrome.runtime.sendMessage({
     type: "GET_BANK",
     payload: { language },
-  })) as BankPhrase[];
+  })) as {
+    phrases: BankPhrase[];
+    currentTier: number;
+    lastBatchId: string;
+    reason: BankReadyReason;
+  };
+
+  currentTier = response.currentTier;
+  currentBatchId = response.lastBatchId;
+  return response.phrases;
+}
+
+function getSiteLevelKey(hostname: string, tier: number): string {
+  return `${hostname}::tier-${tier}`;
+}
+
+function readProcessedSiteLevels(): Set<string> {
+  try {
+    const raw = window.sessionStorage.getItem(PROCESSED_SITE_LEVELS_KEY);
+    const parsed = raw ? (JSON.parse(raw) as string[]) : [];
+    return new Set(parsed);
+  } catch {
+    return new Set();
+  }
+}
+
+function writeProcessedSiteLevels(values: Set<string>): void {
+  try {
+    window.sessionStorage.setItem(PROCESSED_SITE_LEVELS_KEY, JSON.stringify([...values]));
+  } catch {
+    // Ignore session storage failures and fall back to in-memory behavior.
+  }
+}
+
+function shouldForceRefreshCurrentPage(reason: BankReadyReason): boolean {
+  if (reason === "manual") {
+    return true;
+  }
+
+  if (reason === "bank_sync" || reason === "debug_decrement") {
+    return false;
+  }
+
+  const processed = readProcessedSiteLevels();
+  const key = getSiteLevelKey(window.location.hostname, currentTier);
+  if (processed.has(key)) {
+    return false;
+  }
+
+  processed.add(key);
+  writeProcessedSiteLevels(processed);
+  return true;
+}
+
+function readProcessedSiteLevelSignals(): Set<string> {
+  try {
+    const raw = window.sessionStorage.getItem(PROCESSED_SITE_LEVEL_SIGNALS_KEY);
+    const parsed = raw ? (JSON.parse(raw) as string[]) : [];
+    return new Set(parsed);
+  } catch {
+    return new Set();
+  }
+}
+
+function writeProcessedSiteLevelSignals(values: Set<string>): void {
+  try {
+    window.sessionStorage.setItem(PROCESSED_SITE_LEVEL_SIGNALS_KEY, JSON.stringify([...values]));
+  } catch {
+    // Ignore session storage failures.
+  }
+}
+
+function shouldProcessCurrentSiteLevel(): boolean {
+  const processed = readProcessedSiteLevelSignals();
+  const key = getSiteLevelKey(window.location.hostname, currentTier);
+  if (processed.has(key)) {
+    return false;
+  }
+
+  processed.add(key);
+  writeProcessedSiteLevelSignals(processed);
+  return true;
 }
 
 function ensureInitializingBadge(): HTMLElement {
@@ -207,9 +297,14 @@ function markParagraphsProcessed(paragraphs: SerializableParagraph[]): void {
   }
 }
 
-async function applyBankToVisibleParagraphs(): Promise<void> {
+async function applyBankToVisibleParagraphs(forceRefresh = false): Promise<void> {
   if (currentBank.length === 0) {
     return;
+  }
+
+  if (forceRefresh) {
+    clearOutput(document);
+    processedParagraphKeys.clear();
   }
 
   const paragraphs = extractVisibleParagraphs();
@@ -234,16 +329,23 @@ async function applyBankToVisibleParagraphs(): Promise<void> {
       pageType: "unknown" as PageContent["pageType"],
     };
 
-    void chrome.runtime.sendMessage({
-      type: "REPORT_PAGE_SIGNAL",
-      payload: {
-        url: pageContext.url,
-        title: pageContext.title,
-        domain: pageContext.domain,
-        pageType: pageContext.pageType,
-        replacementCount: instructions.length,
-      },
-    });
+    if (shouldProcessCurrentSiteLevel()) {
+      void chrome.runtime.sendMessage({
+        type: "REPORT_PAGE_SIGNAL",
+        payload: {
+          url: pageContext.url,
+          title: pageContext.title,
+          domain: pageContext.domain,
+          pageType: pageContext.pageType,
+          replacementCount: instructions.length,
+        },
+      });
+
+      void chrome.runtime.sendMessage({
+        type: "CHECK_PROGRESSION",
+        payload: { language: currentLanguage },
+      });
+    }
 
     for (const instruction of instructions) {
       void chrome.runtime.sendMessage({
@@ -257,11 +359,6 @@ async function applyBankToVisibleParagraphs(): Promise<void> {
       });
     }
   }
-
-  void chrome.runtime.sendMessage({
-    type: "CHECK_PROGRESSION",
-    payload: { language: currentLanguage },
-  });
 }
 
 async function initPage(): Promise<void> {
@@ -347,9 +444,11 @@ chrome.runtime.onMessage.addListener((message: BackgroundToContentMessage) => {
   }
 
   plannerRequested = false;
-  currentBank = message.payload;
+  currentBank = message.payload.phrases;
+  currentTier = message.payload.currentTier;
+  currentBatchId = message.payload.lastBatchId;
   hideInitializingState();
-  void applyBankToVisibleParagraphs();
+  void applyBankToVisibleParagraphs(shouldForceRefreshCurrentPage(message.payload.reason));
 });
 
 window.setTimeout(() => {

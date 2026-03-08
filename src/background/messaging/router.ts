@@ -25,7 +25,12 @@ export async function routeBackgroundMessage(
   switch (message.type) {
     case "GET_BANK": {
       const bank = await getPhraseBank(message.payload.language);
-      sendResponse(bank.phrases);
+      sendResponse({
+        phrases: bank.phrases,
+        currentTier: bank.currentTier,
+        lastBatchId: bank.lastBatchId,
+        reason: "bank_sync",
+      });
       return true;
     }
 
@@ -60,7 +65,12 @@ export async function routeBackgroundMessage(
         const bank = await getPhraseBank(language);
         const response: BackgroundToContentMessage = {
           type: "BANK_READY",
-          payload: bank.phrases,
+          payload: {
+            phrases: bank.phrases,
+            currentTier: bank.currentTier,
+            lastBatchId: bank.lastBatchId,
+            reason,
+          },
         };
 
         chrome.tabs.sendMessage(tabId, response).catch((error) => {
@@ -215,7 +225,12 @@ Reply ONLY with valid JSON:
         if (typeof tabId === "number") {
           const response: BackgroundToContentMessage = {
             type: "BANK_READY",
-            payload: bank.phrases,
+            payload: {
+              phrases: bank.phrases,
+              currentTier: bank.currentTier,
+              lastBatchId: bank.lastBatchId,
+              reason: "manual",
+            },
           };
           chrome.tabs.sendMessage(tabId, response).catch((error) => {
             console.warn("[GlossPlusOne:router] Failed to send BANK_READY after manual add", error);

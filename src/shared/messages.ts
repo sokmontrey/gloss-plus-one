@@ -14,6 +14,8 @@ export type TriggerPlannerReason =
   | "debug_increment"
   | "debug_decrement";
 
+export type BankReadyReason = TriggerPlannerReason | "manual" | "bank_sync";
+
 export interface GetBankMessage {
   type: "GET_BANK";
   payload: { language: string };
@@ -21,7 +23,12 @@ export interface GetBankMessage {
 
 export interface BankReadyMessage {
   type: "BANK_READY";
-  payload: BankPhrase[];
+  payload: {
+    phrases: BankPhrase[];
+    currentTier: number;
+    lastBatchId: string;
+    reason: BankReadyReason;
+  };
 }
 
 export interface RecordExposureMessage {

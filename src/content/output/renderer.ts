@@ -83,13 +83,37 @@ function getChunkRangeInFullRaw(
  * Skips if a wrapper with this id already exists. Does not replace if text doesn't match.
  */
 export function applyReplacement(instruction: ReplacementInstruction): boolean {
-  const expectedPhrase = instruction.sourceText.slice(instruction.start, instruction.end);
-  console.log(
-    `[GlossPlusOne:renderer] Applying instruction: domPath=${instruction.domPath} phrase=${JSON.stringify(expectedPhrase)} replacement=${JSON.stringify(instruction.replacementText)}`,
-  );
-  const el = resolveDomPath(instruction.domPath);
+  return applyReplacementGroup([instruction]);
+}
+
+function buildReplacementSpan(instruction: ReplacementInstruction): HTMLSpanElement {
+  const span = document.createElement("span");
+  const confidence = instruction.confidence ?? 0;
+  span.setAttribute(GLOSS_MARKER_ATTR, instruction.id);
+  span.setAttribute(GLOSS_SOURCE_ATTR, instruction.sourceText.slice(instruction.start, instruction.end));
+  span.setAttribute("data-gloss-phrase-id", instruction.phraseId ?? "");
+  span.setAttribute("data-gloss-language", instruction.targetLanguage ?? "");
+  span.setAttribute("data-gloss-phrase-type", instruction.phraseType);
+  span.setAttribute("data-gloss-confidence", String(confidence));
+  span.setAttribute("data-gloss-reinforcement", instruction.isReinforcement ? "true" : "false");
+  span.className = GLOSS_WRAPPER_CLASS;
+  span.textContent = instruction.replacementText;
+  span.style.setProperty("--gloss-confidence", String(confidence));
+  span.style.setProperty("--gloss-entry-ms", instruction.isReinforcement ? "460ms" : "720ms");
+  span.style.setProperty("--gloss-entry-delay", `${Math.min(180, instruction.start * 10)}ms`);
+  span.style.setProperty("--gloss-entry-lift", instruction.isReinforcement ? "0.16em" : "0.24em");
+  return span;
+}
+
+function applyReplacementGroup(instructions: ReplacementInstruction[]): boolean {
+  if (instructions.length === 0) {
+    return false;
+  }
+
+  const [firstInstruction] = instructions;
+  const el = resolveDomPath(firstInstruction.domPath);
   if (!el) {
-    console.warn(`[GlossPlusOne:renderer] WARN: domPath not resolved: ${instruction.domPath}`);
+    console.warn(`[GlossPlusOne:renderer] WARN: domPath not resolved: ${firstInstruction.domPath}`);
     return false;
   }
 
@@ -98,26 +122,14 @@ export function applyReplacement(instruction: ReplacementInstruction): boolean {
     return false;
   }
 
-  if (el.querySelector(`[${GLOSS_MARKER_ATTR}="${instruction.id}"]`)) {
+  const normalizedSource = firstInstruction.sourceText.replace(/\s+/g, " ").trim();
+  const chunks = getChunksFromElement(el);
+  const chunkIndex = chunks.findIndex((chunk) => chunk.normalized === normalizedSource);
+  if (chunkIndex === -1) {
     return false;
   }
-
-  const chunks = getChunksFromElement(el);
-  const normalizedSource = instruction.sourceText.replace(/\s+/g, " ").trim();
-  const chunkIndex = chunks.findIndex((c) => c.normalized === normalizedSource);
-  if (chunkIndex === -1) return false;
 
   const chunk = chunks[chunkIndex];
-  const actualPhrase = chunk.normalized.slice(instruction.start, instruction.end);
-  if (actualPhrase !== expectedPhrase) {
-    console.warn(`[GlossPlusOne:renderer] WARN: phrase not found in text node: ${expectedPhrase}`);
-    return false;
-  }
-  const rawStart = normalizedToRawOffset(chunk.raw, Math.min(instruction.start, chunk.normalized.length));
-  const rawEnd = normalizedToRawOffset(chunk.raw, Math.min(instruction.end, chunk.normalized.length));
-  if (rawStart >= chunk.raw.length || rawEnd > chunk.raw.length || rawStart >= rawEnd)
-    return false;
-
   const textNodes = getTextNodesInOrder(el);
   let fullRaw = "";
   const nodeRanges: { node: Text; start: number; end: number }[] = [];
@@ -131,61 +143,120 @@ export function applyReplacement(instruction: ReplacementInstruction): boolean {
 
   const isP = el.tagName.toLowerCase() === "p";
   const chunkRange = getChunkRangeInFullRaw(fullRaw, chunkIndex, isP);
-  if (!chunkRange) return false;
-
-  const globalStart = chunkRange.start + rawStart;
-  const globalEnd = chunkRange.start + rawEnd;
-
-  let startNode: Text | null = null;
-  let startOffset = 0;
-  let endNode: Text | null = null;
-  let endOffset = 0;
-  for (const { node, start, end } of nodeRanges) {
-    if (start <= globalStart && globalStart <= end) {
-      startNode = node;
-      startOffset = globalStart - start;
-    }
-    if (start <= globalEnd && globalEnd <= end) {
-      endNode = node;
-      endOffset = globalEnd - start;
-    }
+  if (!chunkRange) {
+    return false;
   }
-  if (!startNode || !endNode) return false;
 
-  const range = document.createRange();
-  range.setStart(startNode, startOffset);
-  range.setEnd(endNode, endOffset);
+  const prepared = instructions
+    .map((instruction) => {
+      const expectedPhrase = instruction.sourceText.slice(instruction.start, instruction.end);
+      const actualPhrase = chunk.normalized.slice(instruction.start, instruction.end);
+      if (actualPhrase !== expectedPhrase) {
+        console.warn(`[GlossPlusOne:renderer] WARN: phrase not found in text node: ${expectedPhrase}`);
+        return null;
+      }
 
-  const span = document.createElement("span");
-  const confidence = instruction.confidence ?? 0;
-  span.setAttribute(GLOSS_MARKER_ATTR, instruction.id);
-  span.setAttribute(GLOSS_SOURCE_ATTR, instruction.sourceText.slice(instruction.start, instruction.end));
-  span.setAttribute("data-gloss-phrase-id", instruction.phraseId ?? "");
-  span.setAttribute("data-gloss-language", instruction.targetLanguage ?? "");
-  span.setAttribute("data-gloss-phrase-type", instruction.phraseType);
-  span.setAttribute("data-gloss-confidence", String(confidence));
-  span.setAttribute("data-gloss-reinforcement", instruction.isReinforcement ? "true" : "false");
-  span.className = GLOSS_WRAPPER_CLASS;
-  span.textContent = instruction.replacementText;
-  span.style.setProperty("--gloss-confidence", String(confidence));
+      const rawStart = normalizedToRawOffset(chunk.raw, Math.min(instruction.start, chunk.normalized.length));
+      const rawEnd = normalizedToRawOffset(chunk.raw, Math.min(instruction.end, chunk.normalized.length));
+      if (rawStart >= chunk.raw.length || rawEnd > chunk.raw.length || rawStart >= rawEnd) {
+        return null;
+      }
+
+      const globalStart = chunkRange.start + rawStart;
+      const globalEnd = chunkRange.start + rawEnd;
+      let startNode: Text | null = null;
+      let startOffset = 0;
+      let endNode: Text | null = null;
+      let endOffset = 0;
+
+      for (const { node, start, end } of nodeRanges) {
+        if (start <= globalStart && globalStart <= end) {
+          startNode = node;
+          startOffset = globalStart - start;
+        }
+        if (start <= globalEnd && globalEnd <= end) {
+          endNode = node;
+          endOffset = globalEnd - start;
+        }
+      }
+
+      if (!startNode || !endNode) {
+        return null;
+      }
+
+      const range = document.createRange();
+      range.setStart(startNode, startOffset);
+      range.setEnd(endNode, endOffset);
+
+      return {
+        instruction,
+        range,
+      };
+    })
+    .filter(
+      (
+        item,
+      ): item is {
+        instruction: ReplacementInstruction;
+        range: Range;
+      } => item !== null,
+    )
+    .sort((left, right) => right.instruction.start - left.instruction.start);
+
+  if (prepared.length === 0) {
+    return false;
+  }
 
   try {
-    range.deleteContents();
-    range.insertNode(span);
+    for (const { instruction, range } of prepared) {
+      if (el.querySelector(`[${GLOSS_MARKER_ATTR}="${instruction.id}"]`)) {
+        continue;
+      }
+
+      console.log(
+        `[GlossPlusOne:renderer] Applying instruction: domPath=${instruction.domPath} phrase=${JSON.stringify(instruction.sourceText.slice(instruction.start, instruction.end))} replacement=${JSON.stringify(instruction.replacementText)}`,
+      );
+      range.deleteContents();
+      range.insertNode(buildReplacementSpan(instruction));
+      console.log(
+        `[GlossPlusOne:renderer] Wrapped span at offsets ${instruction.start}-${instruction.end}`,
+      );
+    }
   } catch {
     return false;
   }
-  console.log(
-    `[GlossPlusOne:renderer] Wrapped span at offsets ${instruction.start}-${instruction.end}`,
-  );
+
   return true;
+}
+
+export function clearOutput(root: Document | Element = document): void {
+  const scope = root instanceof Document ? root : root.ownerDocument ?? document;
+  const container = root instanceof Document ? root.documentElement : root;
+  const wrappers = [...container.querySelectorAll<HTMLElement>(`.${GLOSS_WRAPPER_CLASS}`)];
+
+  for (const wrapper of wrappers) {
+    const sourceText = wrapper.getAttribute(GLOSS_SOURCE_ATTR) ?? wrapper.textContent ?? "";
+    wrapper.replaceWith(scope.createTextNode(sourceText));
+  }
 }
 
 /**
  * Apply all replacement instructions. Applies in order; skips already-rendered and invalid.
  */
 export function applyOutput(instructions: ReplacementInstruction[]): void {
-  for (const inst of instructions) {
-    applyReplacement(inst);
+  const grouped = new Map<string, ReplacementInstruction[]>();
+
+  for (const instruction of instructions) {
+    const key = `${instruction.domPath}::${instruction.sourceText}`;
+    const existing = grouped.get(key);
+    if (existing) {
+      existing.push(instruction);
+    } else {
+      grouped.set(key, [instruction]);
+    }
+  }
+
+  for (const group of grouped.values()) {
+    applyReplacementGroup(group);
   }
 }
