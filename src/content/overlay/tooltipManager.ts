@@ -1,6 +1,6 @@
 import { GLOSS_WRAPPER_CLASS } from "@/content/output";
 import type { ProgressionConfig } from "@/shared/types";
-import { isPlaying, playAudio, requestAndPlay } from "./audioPlayer";
+import { isPlaying, requestAndPlay, stopPlaying } from "./audioPlayer";
 
 const hoverTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const decayedPhraseIds = new Set<string>();
@@ -50,24 +50,20 @@ function createTooltipEl(): HTMLElement {
       return;
     }
 
-    const text = button.getAttribute("data-text") ?? "";
-    const language = button.getAttribute("data-language") ?? "es";
+    const text = activeSpan?.textContent ?? button.getAttribute("data-text") ?? "";
+    const language = activeSpan?.getAttribute("data-gloss-language") ?? button.getAttribute("data-language") ?? "es";
     const label = button.querySelector("#gloss-speaker-label");
 
-    if (isPlaying(text)) {
-      playAudio("", "");
+    if (isPlaying()) {
+      stopPlaying();
       if (label instanceof HTMLElement) {
         label.textContent = "Listen";
       }
+      button.style.opacity = "1";
       return;
     }
 
-    if (label instanceof HTMLElement) {
-      label.textContent = "...";
-    }
-    button.style.opacity = "0.6";
-
-    void requestAndPlay(
+    requestAndPlay(
       text,
       language,
       () => {
@@ -78,16 +74,11 @@ function createTooltipEl(): HTMLElement {
       },
       () => {
         if (label instanceof HTMLElement) {
-          label.textContent = "⏹ Stop";
+          label.textContent = isPlaying() ? "⏹ Stop" : "Listen";
         }
         button.style.opacity = "1";
       },
-    ).catch(() => {
-      if (label instanceof HTMLElement) {
-        label.textContent = "Listen";
-      }
-      button.style.opacity = "1";
-    });
+    );
   });
   el.addEventListener("mouseenter", () => {
     if (hideTimer) {
@@ -96,7 +87,7 @@ function createTooltipEl(): HTMLElement {
     }
   });
   el.addEventListener("mouseleave", () => {
-    hideTooltip();
+    scheduleHideTooltip();
   });
   document.body.appendChild(el);
   return el;
@@ -156,7 +147,8 @@ function showTooltip(span: HTMLElement): void {
   }
   const foreignPhrase = span.textContent ?? "";
   const originalPhrase = span.getAttribute("data-gloss-source") ?? "";
-  const confidence = parseFloat(span.getAttribute("data-gloss-confidence") ?? "0");
+  const rawConfidence = parseFloat(span.getAttribute("data-gloss-confidence") ?? "0");
+  const confidence = Number.isFinite(rawConfidence) ? rawConfidence : 0;
   const phraseType = span.getAttribute("data-gloss-phrase-type") ?? "structural";
   const language = span.getAttribute("data-gloss-language") ?? "es";
   const filledDots = Math.round(confidence * 5);
@@ -186,7 +178,7 @@ function showTooltip(span: HTMLElement): void {
         transition: background 0.15s ease;
       "
     >
-      🔊 <span id="gloss-speaker-label">${isPlaying(foreignPhrase) ? "⏹ Stop" : "Listen"}</span>
+      🔊 <span id="gloss-speaker-label">${isPlaying() ? "⏹ Stop" : "Listen"}</span>
     </button>
   `;
 
@@ -203,15 +195,23 @@ function showTooltip(span: HTMLElement): void {
   `;
 
   const rect = span.getBoundingClientRect();
-  const tipX = Math.min(rect.left + rect.width / 2 - 120, window.innerWidth - 256);
-  tooltip.style.left = `${Math.max(8, tipX)}px`;
-  tooltip.style.top = `${rect.top - 8}px`;
+  const TOOLTIP_WIDTH = 240;
+  const TOOLTIP_GAP = 8;
+
+  let left = rect.left + rect.width / 2 - TOOLTIP_WIDTH / 2;
+  left = Math.max(TOOLTIP_GAP, Math.min(left, window.innerWidth - TOOLTIP_WIDTH - TOOLTIP_GAP));
+
+  const top = rect.top - TOOLTIP_GAP;
+  tooltip.style.left = `${left}px`;
+  tooltip.style.top = `${top}px`;
   tooltip.style.display = "block";
 
-  const tipRect = tooltip.getBoundingClientRect();
-  if (tipRect.top < 8) {
-    tooltip.style.top = `${rect.bottom + 8}px`;
-  }
+  requestAnimationFrame(() => {
+    const tipRect = tooltip.getBoundingClientRect();
+    if (tipRect.top < TOOLTIP_GAP) {
+      tooltip.style.top = `${rect.bottom + TOOLTIP_GAP}px`;
+    }
+  });
 
   if (!isStructural) {
     fetchDefinition(

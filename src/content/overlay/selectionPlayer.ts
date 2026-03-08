@@ -1,4 +1,4 @@
-import { isPlaying, playAudio, requestAndPlay } from "./audioPlayer";
+import { isPlaying, requestAndPlay, stopPlaying } from "./audioPlayer";
 
 const MIN_CHARS = 2;
 const MAX_CHARS = 60;
@@ -107,8 +107,8 @@ function showSelectionPlayer(text: string, language: string, selection: Selectio
 
   playButton.addEventListener("click", () => {
     const label = playButton.querySelector("span");
-    if (isPlaying(text)) {
-      playAudio("", "");
+    if (isPlaying()) {
+      stopPlaying();
       hideSelectionPlayer();
       return;
     }
@@ -118,24 +118,34 @@ function showSelectionPlayer(text: string, language: string, selection: Selectio
     }
     playButton.style.background = "#92400e";
 
-    void requestAndPlay(
+    requestAndPlay(
       text,
       language,
-      undefined,
+      () => {
+        const nextLabel = playButton.querySelector("span");
+        if (nextLabel instanceof HTMLElement) {
+          nextLabel.textContent = "...";
+        }
+      },
       () => {
         const nextLabel = playButton.querySelector("span");
         if (nextLabel instanceof HTMLElement) {
           nextLabel.textContent = `⏹ ${displayText}`;
         }
+        playButton.style.background = "#92400e";
       },
-    ).catch(() => {
-      hideSelectionPlayer();
-    });
+    );
   });
 
   addButton.addEventListener("click", () => {
     addButton.textContent = "...";
     addButton.style.opacity = "0.6";
+    window.setTimeout(() => {
+      if (addButton.textContent === "...") {
+        addButton.textContent = "timeout — try again";
+        addButton.style.opacity = "1";
+      }
+    }, 8000);
 
     chrome.runtime.sendMessage(
       {
@@ -148,6 +158,13 @@ function showSelectionPlayer(text: string, language: string, selection: Selectio
         },
       },
       (response?: { success?: boolean; targetPhrase?: string }) => {
+        if (chrome.runtime.lastError) {
+          console.warn("[GlossPlusOne:selection] Add phrase message failed:", chrome.runtime.lastError.message);
+          addButton.textContent = "failed";
+          addButton.style.opacity = "1";
+          return;
+        }
+
         if (response?.success) {
           addButton.textContent = `✓ ${response.targetPhrase ?? "added"}`;
           addButton.style.color = "rgba(251,191,36,1)";

@@ -1,3 +1,4 @@
+import { callBackboard } from "../api/backboard";
 import { callGemini } from "../api/gemini";
 import { callGroq } from "../api/groq";
 import { getPhraseBank, removeLastBatch, savePhraseBank } from "../memory/bankStore";
@@ -81,7 +82,22 @@ function isRawPlannerPhrase(value: unknown): value is RawPlannerPhrase {
   );
 }
 
+function hasBackboardConfig(): boolean {
+  return Boolean(
+    import.meta.env.VITE_BACKBOARD_API_KEY?.trim() &&
+    import.meta.env.VITE_BACKBOARD_ASSISTANT_ID?.trim(),
+  );
+}
+
 export async function callPlannerLLM(prompt: string, responseMimeType = "application/json"): Promise<string> {
+  try {
+    if (hasBackboardConfig()) {
+      return await callBackboard(prompt);
+    }
+  } catch (error) {
+    console.warn("[GlossPlusOne:planner] Backboard failed, trying Gemini:", error);
+  }
+
   try {
     return await callGemini(prompt, responseMimeType);
   } catch (error) {
@@ -167,21 +183,78 @@ async function generatePhraseBatch(
     },
   );
 
+  let raw = "";
   try {
-    const raw = await callPlannerLLM(prompt);
-    const parsed = parsePlannerResponse(raw);
-    const now = Date.now();
+    raw = await callPlannerLLM(prompt);
+    console.log("[GlossPlusOne:planner] Raw LLM response:", raw);
 
-    return parsed
+    // Strip markdown fences (Gemini 2.5 ignores responseMimeType sometimes)
+    let clean = raw
+      .replace(/```json\s*/gi, "")
+      .replace(/```\s*/g, "")
+      .trim();
+
+    // If response is a JSON object wrapping the array, unwrap it.
+    // Handles: { "phrases": [...] }, { "replacements": [...] }, etc.
+    if (clean.startsWith("{")) {
+      const obj = JSON.parse(clean) as Record<string, unknown>;
+      const arr =
+        obj.phrases ??
+        obj.replacements ??
+        obj.data ??
+        obj.result ??
+        obj.items ??
+        Object.values(obj).find((value) => Array.isArray(value));
+      if (!Array.isArray(arr)) {
+        console.warn("[GlossPlusOne:planner] Could not find array in object:", clean);
+        return [];
+      }
+      clean = JSON.stringify(arr);
+    }
+
+    const parsed = JSON.parse(clean) as unknown[];
+    if (!Array.isArray(parsed) || parsed.length === 0) {
+      console.warn("[GlossPlusOne:planner] Empty batch after parse. Raw:", raw);
+      return [];
+    }
+
+    const valid = parsed.filter(
+      (
+        phrase,
+      ): phrase is {
+        phrase: string;
+        targetPhrase: string;
+        phraseType?: "structural" | "lexical";
+        tier?: number;
+      } => {
+        return (
+          typeof phrase === "object" &&
+          phrase !== null &&
+          typeof (phrase as Record<string, unknown>).phrase === "string" &&
+          typeof (phrase as Record<string, unknown>).targetPhrase === "string"
+        );
+      },
+    );
+
+    if (valid.length === 0) {
+      console.warn("[GlossPlusOne:planner] All entries failed validation:", parsed);
+      return [];
+    }
+
+    console.log(`[GlossPlusOne:planner] Parsed ${valid.length} valid phrases from batch`);
+    return valid
       .map((phrase) => ({
         id: crypto.randomUUID(),
-        phrase: normalizePhrase(phrase.phrase),
+        phrase: normalizePhrase(phrase.phrase).toLowerCase().trim(),
         targetPhrase: normalizePhrase(phrase.targetPhrase),
         targetLanguage: language,
         nativeLanguage: userContext.nativeLanguage,
-        phraseType: phrase.phraseType,
+        phraseType:
+          phrase.phraseType === "structural" || phrase.phraseType === "lexical"
+            ? phrase.phraseType
+            : "structural",
         tier,
-        addedAt: now,
+        addedAt: Date.now(),
         addedByBatch: batchId,
         confidence: 0,
         exposures: 0,
@@ -192,8 +265,14 @@ async function generatePhraseBatch(
       }))
       .filter((phrase) => phrase.phrase.length > 0 && phrase.targetPhrase.length > 0)
       .filter((phrase) => !existingSet.has(phrase.phrase.toLowerCase()));
-  } catch (error) {
-    console.error("[GlossPlusOne:planner] Batch generation failed:", error);
+  } catch (err) {
+    console.error(
+      "[GlossPlusOne:planner] Batch parse failed.",
+      "Error:",
+      err,
+      "Raw response:",
+      raw,
+    );
     return [];
   }
 }
@@ -268,7 +347,7 @@ ${readingSamplesContext}
 ALREADY IN BANK (do NOT include these):
 ${existing.length > 0 ? existing.map((phrase) => `  "${phrase}"`).join("\n") : "  none yet"}
 
-Generate exactly 12 structural phrases appropriate for ${tierLabel} level.
+Generate exactly 10 structural phrases appropriate for ${tierLabel} level.
 These are multi-word chunks that demonstrate grammar patterns.
 Focus on: discourse connectors, copula constructions, existential frames,
 modal phrases, purpose/cause structures, question formations.
@@ -280,13 +359,16 @@ Rules:
 - Generate the most natural ${language} equivalent (not literal translation)
 - phraseType should always be "structural"
 
-Return ONLY valid JSON array, no markdown, no explanation:
+Return a JSON array and nothing else. No markdown. No explanation.
+No wrapper object. The response must start with [ and end with ].
+Generate exactly 10 entries.
+
+Required format:
 [
   {
     "phrase": "this is",
-    "targetPhrase": "esto es",
-    "phraseType": "structural",
-    "pedagogicalNote": "copula with demonstrative"
+    "targetPhrase": "c'est",
+    "phraseType": "structural"
   }
 ]`;
 }
@@ -344,13 +426,16 @@ Rules:
 - Generate the most natural ${language} equivalent
 - phraseType should always be "lexical"
 
-Return ONLY valid JSON array, no markdown:
+Return a JSON array and nothing else. No markdown. No explanation.
+No wrapper object. The response must start with [ and end with ].
+Generate exactly 10 entries.
+
+Required format:
 [
   {
     "phrase": "raises concerns",
     "targetPhrase": "plantea preocupaciones",
-    "phraseType": "lexical",
-    "pedagogicalNote": "verb-noun collocation common in news"
+    "phraseType": "lexical"
   }
 ]`;
 }

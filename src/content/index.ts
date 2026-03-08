@@ -14,6 +14,7 @@ import type {
 } from "@/shared/messages";
 import { applyOutputAndAnimate, clearOutput, injectOutputStyles } from "./output";
 import { DISABLED_PAGES_KEY, isPageDisabled, isPageDisabledInSnapshot } from "@/shared/pageDisable";
+import { BANK_KEY, getPhraseBankFromSnapshot } from "@/shared/phraseBankStorage";
 import type { BankPhrase, ProgressionConfig, UserContext } from "@/shared/types";
 import type { PageContent } from "./reader/types";
 
@@ -34,6 +35,7 @@ let latestPageContext: Pick<PageContent, "url" | "title" | "domain" | "pageType"
 let currentTier = 1;
 let currentBatchId = "";
 let pageDisabled = false;
+let waitingForInitialBank = false;
 
 const USER_CONTEXT_KEY = "userContext";
 const CONFIG_KEY = "glossProgressionConfig";
@@ -118,6 +120,11 @@ function buildInstructionsFromBank(
   const sortedBank = [...bank].sort((left, right) => right.phrase.length - left.phrase.length);
 
   for (const paragraph of paragraphs) {
+    const el = resolveDomPath(paragraph.domPath);
+    if (el && el.querySelector(".gloss-plus-one-replacement")) {
+      continue;
+    }
+
     const sourceText = normalizeText(paragraph.text);
     const searchableText = sourceText.toLowerCase();
     const usedRanges: Array<{ start: number; end: number }> = [];
@@ -315,6 +322,32 @@ function hideInitializingState(): void {
   }
 }
 
+function waitForBankAvailability(): void {
+  if (waitingForInitialBank) {
+    return;
+  }
+
+  waitingForInitialBank = true;
+  const waitForBank = (
+    changes: Record<string, chrome.storage.StorageChange>,
+    area: string,
+  ) => {
+    if (area !== "local") return;
+    if (!changes[BANK_KEY]?.newValue) return;
+
+    const bank = getPhraseBankFromSnapshot(changes[BANK_KEY].newValue, currentLanguage);
+    if (!bank.phrases || bank.phrases.length === 0) return;
+
+    console.log("[GlossPlusOne:content] Bank arrived, running replacements");
+    waitingForInitialBank = false;
+    chrome.storage.onChanged.removeListener(waitForBank);
+    processedParagraphKeys.clear();
+    void initPage();
+  };
+
+  chrome.storage.onChanged.addListener(waitForBank);
+}
+
 function extractVisibleParagraphs(): SerializableParagraph[] {
   const run = metrics.start("delta");
   const content = withReadOnlyDomGuard(() => enrichPageContent(document));
@@ -375,8 +408,19 @@ async function applyBankToVisibleParagraphs(forceRefresh = false): Promise<void>
 
   const instructions = buildInstructionsFromBank(paragraphs, currentBank);
   console.log(
-    `[GlossPlusOne:content] Bank ${currentBank.length} phrases produced ${instructions.length} matches`,
+    `[GlossPlusOne:content] Bank: ${currentBank.length} phrases | ` +
+      `Paragraphs: ${paragraphs.length} | ` +
+      `Matches: ${instructions.length}`,
   );
+  if (instructions.length === 0 && currentBank.length > 0) {
+    console.warn(
+      "[GlossPlusOne:content] Bank has phrases but zero matches.",
+      "First 3 bank phrases:",
+      currentBank.slice(0, 3).map((phrase) => phrase.phrase),
+      "First paragraph text (first 100 chars):",
+      paragraphs[0]?.text?.slice(0, 100) ?? "(none)",
+    );
+  }
 
   markParagraphsProcessed(paragraphs);
 
@@ -469,6 +513,7 @@ async function initPage(): Promise<void> {
   currentBank = await getBankPhrases(currentLanguage);
   if (currentBank.length === 0) {
     showInitializingState();
+    waitForBankAvailability();
     if (!plannerRequested) {
       plannerRequested = true;
       void chrome.runtime.sendMessage({
@@ -581,6 +626,28 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
     if (nextDisabled !== pageDisabled) {
       applyPageDisabledState(nextDisabled);
     }
+  }
+
+  if (changes[BANK_KEY]) {
+    const nextBank = getPhraseBankFromSnapshot(changes[BANK_KEY].newValue, currentLanguage);
+    currentBank = nextBank.phrases;
+    currentTier = nextBank.currentTier;
+    currentBatchId = nextBank.lastBatchId;
+
+    if (pageDisabled) {
+      return;
+    }
+
+    if (currentBank.length === 0) {
+      showInitializingState();
+      clearOutput(document);
+      processedParagraphKeys.clear();
+      return;
+    }
+
+    hideInitializingState();
+    processedParagraphKeys.clear();
+    void initPage();
   }
 
   if (changes[USER_CONTEXT_KEY]) {

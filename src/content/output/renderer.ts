@@ -88,20 +88,25 @@ export function applyReplacement(instruction: ReplacementInstruction): boolean {
 
 function buildReplacementSpan(instruction: ReplacementInstruction): HTMLSpanElement {
   const span = document.createElement("span");
+  const originalPhrase = instruction.sourceText.slice(instruction.start, instruction.end);
   const confidence = instruction.confidence ?? 0;
+  const isReinforcement = instruction.isReinforcement ?? false;
+  const phraseId = instruction.phraseId ?? "";
+  const targetLanguage = instruction.targetLanguage ?? "";
+  const phraseType = instruction.phraseType ?? "structural";
   span.setAttribute(GLOSS_MARKER_ATTR, instruction.id);
-  span.setAttribute(GLOSS_SOURCE_ATTR, instruction.sourceText.slice(instruction.start, instruction.end));
-  span.setAttribute("data-gloss-phrase-id", instruction.phraseId ?? "");
-  span.setAttribute("data-gloss-language", instruction.targetLanguage ?? "");
-  span.setAttribute("data-gloss-phrase-type", instruction.phraseType);
+  span.setAttribute(GLOSS_SOURCE_ATTR, originalPhrase);
+  span.setAttribute("data-gloss-phrase-id", phraseId);
+  span.setAttribute("data-gloss-language", targetLanguage);
+  span.setAttribute("data-gloss-phrase-type", phraseType);
   span.setAttribute("data-gloss-confidence", String(confidence));
-  span.setAttribute("data-gloss-reinforcement", instruction.isReinforcement ? "true" : "false");
+  span.setAttribute("data-gloss-reinforcement", isReinforcement ? "true" : "false");
   span.className = GLOSS_WRAPPER_CLASS;
   span.textContent = instruction.replacementText;
   span.style.setProperty("--gloss-confidence", String(confidence));
-  span.style.setProperty("--gloss-entry-ms", instruction.isReinforcement ? "460ms" : "720ms");
+  span.style.setProperty("--gloss-entry-ms", isReinforcement ? "460ms" : "720ms");
   span.style.setProperty("--gloss-entry-delay", `${Math.min(180, instruction.start * 10)}ms`);
-  span.style.setProperty("--gloss-entry-lift", instruction.isReinforcement ? "0.16em" : "0.24em");
+  span.style.setProperty("--gloss-entry-lift", isReinforcement ? "0.16em" : "0.24em");
   return span;
 }
 

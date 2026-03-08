@@ -1,5 +1,7 @@
 import { callPlannerLLM, extractPageTopic, runPlanner } from "@/background/agent/planner";
 import { synthesizeSpeech } from "@/background/api/elevenlabs";
+import { callGemini } from "@/background/api/gemini";
+import { callGroq } from "@/background/api/groq";
 import {
   getPhraseBank,
   recordExposure,
@@ -16,6 +18,68 @@ import {
 import { getUserContext } from "@/background/memory/store";
 import type { BackgroundToContentMessage, ContentToBackgroundMessage } from "@/shared/messages";
 import type { BankPhrase } from "@/shared/types";
+
+async function callStructuredTranslationLLM(prompt: string): Promise<string> {
+  try {
+    return await callGemini(prompt, "application/json");
+  } catch (error) {
+    console.warn("[GlossPlusOne:router] Gemini translation failed, trying Groq:", error);
+  }
+
+  try {
+    return await callGroq(prompt, "application/json");
+  } catch (error) {
+    console.warn("[GlossPlusOne:router] Groq translation failed, trying planner fallback:", error);
+    return await callPlannerLLM(prompt, "application/json");
+  }
+}
+
+function parseAddPhraseResponse(raw: string): {
+  targetPhrase: string;
+  phraseType: "structural" | "lexical";
+  tier: number;
+} {
+  let clean = raw
+    .replace(/```json\s*/gi, "")
+    .replace(/```\s*/g, "")
+    .trim();
+
+  if (clean.startsWith("[")) {
+    const parsedArray = JSON.parse(clean) as Array<Record<string, unknown>>;
+    clean = JSON.stringify(parsedArray[0] ?? {});
+  }
+
+  if (clean.startsWith("{")) {
+    const parsedObject = JSON.parse(clean) as Record<string, unknown>;
+    const candidate =
+      parsedObject.data ??
+      parsedObject.result ??
+      parsedObject.item ??
+      parsedObject.translation ??
+      parsedObject;
+    clean = JSON.stringify(candidate);
+  }
+
+  const parsed = JSON.parse(clean) as Record<string, unknown>;
+  const targetPhrase = typeof parsed.targetPhrase === "string"
+    ? parsed.targetPhrase.replace(/\s+/g, " ").trim()
+    : typeof parsed.translation === "string"
+      ? parsed.translation.replace(/\s+/g, " ").trim()
+      : "";
+
+  if (!targetPhrase) {
+    throw new Error("ADD_PHRASE_TARGET_MISSING");
+  }
+
+  return {
+    targetPhrase,
+    phraseType: parsed.phraseType === "lexical" ? "lexical" : "structural",
+    tier:
+      typeof parsed.tier === "number" && Number.isFinite(parsed.tier)
+        ? parsed.tier
+        : 1,
+  };
+}
 
 export async function routeBackgroundMessage(
   message: ContentToBackgroundMessage,
@@ -164,26 +228,24 @@ export async function routeBackgroundMessage(
     case "ADD_PHRASE_TO_BANK": {
       const { phrase, language, sourceUrl, sourceTitle } = message.payload;
       const normalizedPhrase = phrase.replace(/\s+/g, " ").trim();
+      const normalizedBankPhrase = normalizedPhrase.toLowerCase();
       const userContext = await getUserContext();
       const prompt = `Translate this phrase to ${language}.
 Native language: ${userContext.nativeLanguage}
 Phrase: "${normalizedPhrase}"
 
-Reply ONLY with valid JSON:
+Return a JSON object and nothing else. No markdown. No explanation.
+Required format:
 {"targetPhrase":"translation","phraseType":"structural|lexical","tier":1}`;
 
       try {
-        const raw = await callPlannerLLM(prompt);
-        const clean = raw.replace(/```json|```/g, "").trim();
-        const parsed = JSON.parse(clean) as {
-          targetPhrase: string;
-          phraseType: "structural" | "lexical";
-          tier: number;
-        };
+        const raw = await callStructuredTranslationLLM(prompt);
+        console.log("[GlossPlusOne:router] Raw add-phrase response:", raw);
+        const parsed = parseAddPhraseResponse(raw);
 
         const bank = await getPhraseBank(language);
         const existing = bank.phrases.find(
-          (entry) => entry.phrase.toLowerCase() === normalizedPhrase.toLowerCase(),
+          (entry) => entry.phrase.toLowerCase() === normalizedBankPhrase,
         );
         if (existing) {
           sendResponse({ success: true, targetPhrase: existing.targetPhrase });
@@ -193,8 +255,8 @@ Reply ONLY with valid JSON:
         const batchId = crypto.randomUUID();
         const newPhrase: BankPhrase = {
           id: crypto.randomUUID(),
-          phrase: normalizedPhrase,
-          targetPhrase: parsed.targetPhrase.replace(/\s+/g, " ").trim(),
+          phrase: normalizedBankPhrase,
+          targetPhrase: parsed.targetPhrase,
           targetLanguage: language,
           nativeLanguage: userContext.nativeLanguage,
           phraseType: parsed.phraseType,

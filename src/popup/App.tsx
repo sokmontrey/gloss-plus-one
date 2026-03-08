@@ -9,7 +9,7 @@ import {
   isToggleablePageUrl,
   setPageDisabled,
 } from "@/shared/pageDisable";
-import { BANK_KEY, getPhraseBankFromSnapshot } from "@/shared/phraseBankStorage";
+import { BANK_KEY, createEmptyPhraseBank, getPhraseBankFromSnapshot } from "@/shared/phraseBankStorage";
 import type { PhraseBank, ProgressionConfig, UserContext, UserInterestProfile } from "@/shared/types";
 
 const CONFIG_KEY = "glossProgressionConfig";
@@ -100,13 +100,12 @@ async function getCurrentPageStatus(): Promise<PageControlState> {
 
 export default function App() {
   const [state, setState] = useState<PopupState>({
-    bank: null,
+    bank: createEmptyPhraseBank("es"),
     config: DEFAULT_CONFIG,
     targetLanguage: "es",
     profile: null,
   });
-  const [plannerQueued, setPlannerQueued] = useState(false);
-  const [profileExpanded, setProfileExpanded] = useState(false);
+  const [isPlanning, setIsPlanning] = useState(false);
   const [pageControl, setPageControl] = useState<PageControlState>({
     status: "loading",
     url: null,
@@ -152,7 +151,6 @@ export default function App() {
         ...nextPageControl,
         saving: current.saving && current.url === nextPageControl.url ? current.saving : false,
       }));
-      setPlannerQueued(false);
     };
 
     void refresh();
@@ -174,7 +172,12 @@ export default function App() {
   }, []);
 
   const handlePlanner = async (reason: "debug_increment" | "debug_decrement") => {
-    setPlannerQueued(true);
+    const shouldShowPlanningState = reason === "debug_increment";
+    if (shouldShowPlanningState) {
+      setIsPlanning(true);
+      window.setTimeout(() => setIsPlanning(false), 3000);
+    }
+
     await chrome.runtime.sendMessage({
       type: "TRIGGER_PLANNER",
       payload: {
@@ -203,7 +206,7 @@ export default function App() {
     setState((current) => ({
       ...current,
       targetLanguage: nextLanguage,
-      bank: null,
+      bank: createEmptyPhraseBank(nextLanguage),
     }));
 
     const result = await chrome.storage.local.get([USER_CONTEXT_KEY, BANK_KEY]);
@@ -321,18 +324,29 @@ export default function App() {
           <Badge variant="warning">Tier {state.bank?.currentTier ?? 1}</Badge>
         </div>
         <div className="mt-3 flex items-center gap-3">
-          <Button size="icon-sm" variant="outline" onClick={() => void handlePlanner("debug_decrement")}>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => void handlePlanner("debug_decrement")}
+            className="min-w-[112px] justify-center gap-2"
+          >
             <Minus />
+            Remove batch
           </Button>
           <div className="flex-1 text-center text-xs text-muted-foreground">
             {state.bank?.phrases.length ?? 0} phrases · {state.bank?.batches.length ?? 0} batches
-            {plannerQueued ? " · queued" : ""}
           </div>
-          <Button size="icon-sm" onClick={() => void handlePlanner("debug_increment")}>
+          <Button
+            size="sm"
+            onClick={() => void handlePlanner("debug_increment")}
+            disabled={isPlanning}
+            className="min-w-[112px] justify-center gap-2"
+          >
             <Plus />
+            {isPlanning ? "Planning..." : "New batch"}
           </Button>
         </div>
-        <p className="mt-2 text-[11px] text-muted-foreground">`+` adds the next tier. `-` removes the last batch.</p>
+        <p className="mt-2 text-[11px] text-muted-foreground">Phrase count updates as new batches arrive.</p>
       </section>
 
       <section className="rounded-lg border border-border bg-muted/30 p-3">
@@ -354,32 +368,28 @@ export default function App() {
         />
       </section>
 
-      {state.profile && state.profile.topTopics.length > 0 ? (
-        <section className="rounded-lg border border-border bg-muted/30 p-3">
-          <button
-            type="button"
-            onClick={() => setProfileExpanded((current) => !current)}
-            className="flex w-full items-center justify-between text-left"
-          >
-            <span className="text-xs font-medium">Reading profile</span>
-            <span className="text-[11px] text-muted-foreground">
-              {profileExpanded ? "Hide" : "Show"}
-            </span>
-          </button>
-          {profileExpanded ? (
-            <div className="mt-2 flex flex-wrap gap-1">
-              {state.profile.topTopics.slice(0, 5).map((topic) => (
-                <span
-                  key={topic}
-                  className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-xs text-amber-700"
-                >
-                  {topic}
-                </span>
-              ))}
-            </div>
-          ) : null}
-        </section>
-      ) : null}
+      <section className="rounded-lg border border-border bg-muted/30 p-3">
+        <div className="flex items-center justify-between">
+          <span className="text-xs font-medium">Reading profile</span>
+          <span className="text-[11px] text-muted-foreground">
+            {state.profile?.topTopics.length ?? 0} topic tags
+          </span>
+        </div>
+        {state.profile && state.profile.topTopics.length > 0 ? (
+          <div className="mt-2 flex flex-wrap gap-1">
+            {state.profile.topTopics.slice(0, 5).map((topic) => (
+              <span
+                key={topic}
+                className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-xs text-amber-700"
+              >
+                {topic}
+              </span>
+            ))}
+          </div>
+        ) : (
+          <p className="mt-2 text-[11px] text-slate-400">Topics will appear after reading a few pages</p>
+        )}
+      </section>
 
       <Button size="sm" variant="outline" onClick={openDashboard} className="w-full justify-center gap-2">
         <ExternalLink className="h-3.5 w-3.5" />

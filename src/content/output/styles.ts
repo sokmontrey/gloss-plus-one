@@ -15,25 +15,22 @@ export const OUTPUT_STYLES = `
     transform var(--gloss-entry-ms, 600ms) cubic-bezier(0.22, 1, 0.36, 1),
     opacity 320ms ease,
     filter 420ms ease,
-    background-color 0.4s ease,
-    text-decoration-color 0.3s ease,
-    box-shadow 0.45s ease;
+    background-color 0.3s ease,
+    text-decoration-color 0.3s ease;
 }
 .${GLOSS_WRAPPER_CLASS}[data-gloss-reinforcement="false"] {
+  background-color: rgba(251, 191, 36, 0.2);
   text-decoration: underline;
   text-decoration-color: rgba(251, 191, 36, 0.9);
   text-decoration-thickness: 2px;
   text-underline-offset: 3px;
-  background-color: rgba(251, 191, 36, 0.18);
-  box-shadow: inset 0 -0.5em rgba(251, 191, 36, calc(0.1 + ((1 - var(--gloss-confidence, 0)) * 0.16)));
 }
 .${GLOSS_WRAPPER_CLASS}[data-gloss-reinforcement="true"] {
+  background-color: rgba(251, 191, 36, calc(0.18 - (var(--gloss-confidence, 0) * 0.17)));
   text-decoration: underline;
-  text-decoration-color: rgba(251, 191, 36, calc(0.8 - (var(--gloss-confidence, 0) * 0.7)));
+  text-decoration-color: rgba(251, 191, 36, calc(0.9 - (var(--gloss-confidence, 0) * 0.8)));
   text-decoration-thickness: 2px;
   text-underline-offset: 3px;
-  background-color: rgba(251, 191, 36, calc(0.15 - (var(--gloss-confidence, 0) * 0.14)));
-  box-shadow: inset 0 -0.42em rgba(251, 191, 36, calc(0.08 + ((1 - var(--gloss-confidence, 0)) * 0.1)));
 }
 .${GLOSS_WRAPPER_CLASS}[data-gloss-phrase-type="structural"] {
   font-weight: 500;
@@ -49,7 +46,8 @@ export const OUTPUT_STYLES = `
 }
 .${GLOSS_WRAPPER_CLASS}:hover {
   background-color: rgba(251, 191, 36, 0.3) !important;
-  text-decoration-color: rgba(251, 191, 36, 1) !important;
+  outline: 1px solid rgba(251, 191, 36, 0.6);
+  border-radius: 2px;
 }
 
 @keyframes gloss-plus-one-informed-entry {
