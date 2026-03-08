@@ -6,7 +6,7 @@ Built at Hack Canada 2026 🇨🇦
 </div>
 
 ## 🌟 Overview
-GlossPlusOne is an intelligent language learning overlay that transforms your everyday browsing into an immersive language learning experience. 
+GlossPlusOne (g+1) is an intelligent language learning overlay that transforms your everyday browsing into an immersive language learning experience. 
 
 ## What's this random ahh sounding name?
 Let's address this. 
