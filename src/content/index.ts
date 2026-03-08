@@ -2,15 +2,18 @@ import { enrichPageContent } from "./reader/enricher";
 import { createMetrics } from "./reader/metrics";
 import { resolveDomPath } from "./reader/domPath";
 import { withReadOnlyDomGuard } from "./reader/runtimeGuards";
-import { initSelectionPlayer } from "./overlay/selectionPlayer";
-import { initHoverListeners } from "./overlay/tooltipManager";
+import { initSelectionPlayer, setSelectionPlayerEnabled } from "./overlay/selectionPlayer";
+import { initHoverListeners, setHoverListenersEnabled } from "./overlay/tooltipManager";
 import type {
   BackgroundToContentMessage,
   BankReadyReason,
+  CurrentPageStatus,
+  PopupToContentMessage,
   ReplacementInstruction,
   SerializableParagraph,
 } from "@/shared/messages";
 import { applyOutputAndAnimate, clearOutput, injectOutputStyles } from "./output";
+import { DISABLED_PAGES_KEY, isPageDisabled, isPageDisabledInSnapshot } from "@/shared/pageDisable";
 import type { BankPhrase, ProgressionConfig, UserContext } from "@/shared/types";
 import type { PageContent } from "./reader/types";
 
@@ -30,6 +33,7 @@ let initializingBadge: HTMLElement | null = null;
 let latestPageContext: Pick<PageContent, "url" | "title" | "domain" | "pageType"> | null = null;
 let currentTier = 1;
 let currentBatchId = "";
+let pageDisabled = false;
 
 const USER_CONTEXT_KEY = "userContext";
 const CONFIG_KEY = "glossProgressionConfig";
@@ -298,7 +302,7 @@ function markParagraphsProcessed(paragraphs: SerializableParagraph[]): void {
 }
 
 async function applyBankToVisibleParagraphs(forceRefresh = false): Promise<void> {
-  if (currentBank.length === 0) {
+  if (pageDisabled || currentBank.length === 0) {
     return;
   }
 
@@ -361,14 +365,39 @@ async function applyBankToVisibleParagraphs(forceRefresh = false): Promise<void>
   }
 }
 
+function applyPageDisabledState(disabled: boolean): void {
+  const changed = pageDisabled !== disabled;
+  pageDisabled = disabled;
+  setHoverListenersEnabled(!disabled);
+  setSelectionPlayerEnabled(!disabled);
+
+  if (disabled) {
+    hideInitializingState();
+    clearOutput(document);
+    processedParagraphKeys.clear();
+    return;
+  }
+
+  if (changed) {
+    processedParagraphKeys.clear();
+    void initPage();
+  }
+}
+
 async function initPage(): Promise<void> {
   const [userContext, config] = await Promise.all([getPageUserContext(), getProgressionConfig()]);
   currentLanguage = userContext.targetLanguage;
+
+  applyPageDisabledState(await isPageDisabled(window.location.href));
+  if (pageDisabled) {
+    return;
+  }
 
   if (!hoverInitialized) {
     initHoverListeners(config, userContext.targetLanguage, userContext.nativeLanguage, "structural");
     hoverInitialized = true;
   }
+  setHoverListenersEnabled(true);
 
   if (!selectionInitialized) {
     initSelectionPlayer(userContext.targetLanguage);
@@ -376,6 +405,7 @@ async function initPage(): Promise<void> {
   } else {
     initSelectionPlayer(userContext.targetLanguage);
   }
+  setSelectionPlayerEnabled(true);
 
   currentBank = await getBankPhrases(currentLanguage);
   if (currentBank.length === 0) {
@@ -395,6 +425,10 @@ async function initPage(): Promise<void> {
 }
 
 const observer = new MutationObserver((records) => {
+  if (pageDisabled) {
+    return;
+  }
+
   const hasAddedElements = records.some((record) =>
     Array.from(record.addedNodes).some((node) => node.nodeType === Node.ELEMENT_NODE),
   );
@@ -419,6 +453,10 @@ if (document.body) {
 window.addEventListener(
   "scroll",
   () => {
+    if (pageDisabled) {
+      return;
+    }
+
     const nextScrollY = window.scrollY;
     const scrollingDown = nextScrollY > lastScrollY;
     lastScrollY = nextScrollY;
@@ -438,17 +476,49 @@ window.addEventListener(
   { passive: true },
 );
 
-chrome.runtime.onMessage.addListener((message: BackgroundToContentMessage) => {
-  if (message.type !== "BANK_READY") {
+chrome.runtime.onMessage.addListener(
+  (
+    message: BackgroundToContentMessage | PopupToContentMessage,
+    _sender,
+    sendResponse: (response?: CurrentPageStatus) => void,
+  ) => {
+    if (message.type === "GET_PAGE_STATUS") {
+      sendResponse({
+        url: window.location.href,
+        disabled: pageDisabled,
+      });
+      return;
+    }
+
+    if (message.type !== "BANK_READY") {
+      return;
+    }
+
+    plannerRequested = false;
+    currentBank = message.payload.phrases;
+    currentTier = message.payload.currentTier;
+    currentBatchId = message.payload.lastBatchId;
+    hideInitializingState();
+
+    if (pageDisabled) {
+      return;
+    }
+
+    void applyBankToVisibleParagraphs(shouldForceRefreshCurrentPage(message.payload.reason));
+  },
+);
+
+chrome.storage.onChanged.addListener((changes, areaName) => {
+  if (areaName !== "local" || !changes[DISABLED_PAGES_KEY]) {
     return;
   }
 
-  plannerRequested = false;
-  currentBank = message.payload.phrases;
-  currentTier = message.payload.currentTier;
-  currentBatchId = message.payload.lastBatchId;
-  hideInitializingState();
-  void applyBankToVisibleParagraphs(shouldForceRefreshCurrentPage(message.payload.reason));
+  const nextDisabled = isPageDisabledInSnapshot(window.location.href, changes[DISABLED_PAGES_KEY].newValue);
+  if (nextDisabled === pageDisabled) {
+    return;
+  }
+
+  applyPageDisabledState(nextDisabled);
 });
 
 window.setTimeout(() => {

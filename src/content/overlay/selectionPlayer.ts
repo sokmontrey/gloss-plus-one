@@ -6,6 +6,7 @@ const MAX_CHARS = 60;
 let selectionEl: HTMLElement | null = null;
 let currentLanguage = "es";
 let listenersBound = false;
+let selectionPlayerEnabled = true;
 
 function escapeHtml(value: string): string {
   return value
@@ -29,6 +30,14 @@ function ensureSelectionEl(): HTMLElement {
 function hideSelectionPlayer(): void {
   if (selectionEl) {
     selectionEl.style.display = "none";
+  }
+}
+
+export function setSelectionPlayerEnabled(enabled: boolean): void {
+  selectionPlayerEnabled = enabled;
+
+  if (!enabled) {
+    hideSelectionPlayer();
   }
 }
 
@@ -164,6 +173,11 @@ export function initSelectionPlayer(language: string): void {
   }
 
   document.addEventListener("mouseup", () => {
+    if (!selectionPlayerEnabled) {
+      hideSelectionPlayer();
+      return;
+    }
+
     const selection = window.getSelection();
     const text = selection?.toString().trim() ?? "";
 
@@ -181,6 +195,11 @@ export function initSelectionPlayer(language: string): void {
   });
 
   document.addEventListener("mousedown", (event) => {
+    if (!selectionPlayerEnabled) {
+      hideSelectionPlayer();
+      return;
+    }
+
     const target = event.target;
     if (target instanceof Element && target.closest("#gloss-selection-player")) {
       return;

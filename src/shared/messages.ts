@@ -116,6 +116,15 @@ export interface AddPhraseToBankMessage {
   };
 }
 
+export interface GetPageStatusMessage {
+  type: "GET_PAGE_STATUS";
+}
+
+export interface CurrentPageStatus {
+  url: string;
+  disabled: boolean;
+}
+
 export type ContentToBackgroundMessage =
   | GetBankMessage
   | RecordExposureMessage
@@ -127,6 +136,8 @@ export type ContentToBackgroundMessage =
   | RequestAudioMessage
   | ReportPageSignalMessage
   | AddPhraseToBankMessage;
+
+export type PopupToContentMessage = GetPageStatusMessage;
 
 /** Single replacement target: one phrase within a paragraph identified by domPath. */
 export interface ReplacementInstruction {

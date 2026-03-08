@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from "react";
 import { ExternalLink, Minus, Plus } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { DISABLED_PAGES_KEY, setPageDisabled } from "@/shared/pageDisable";
+import type { CurrentPageStatus, GetPageStatusMessage } from "@/shared/messages";
 import type { PhraseBank, ProgressionConfig, UserContext, UserInterestProfile } from "@/shared/types";
 
 const BANK_KEY = "glossPhraseBank";
@@ -24,6 +26,13 @@ interface PopupState {
   profile: UserInterestProfile | null;
 }
 
+interface PageControlState {
+  status: "loading" | "ready" | "unsupported";
+  url: string | null;
+  disabled: boolean;
+  saving: boolean;
+}
+
 function thresholdToSliderValue(threshold: number): number {
   const closestIndex = PROGRESSION_STEPS.reduce(
     (bestIndex, value, index) =>
@@ -41,6 +50,47 @@ function openDashboard() {
   chrome.runtime.openOptionsPage?.() ?? chrome.tabs.create({ url: chrome.runtime.getURL("src/dashboard/index.html") });
 }
 
+async function getActiveTabId(): Promise<number | null> {
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  return typeof tab?.id === "number" ? tab.id : null;
+}
+
+async function getCurrentPageStatus(): Promise<PageControlState> {
+  const tabId = await getActiveTabId();
+  if (tabId === null) {
+    return {
+      status: "unsupported",
+      url: null,
+      disabled: false,
+      saving: false,
+    };
+  }
+
+  try {
+    const response = (await chrome.tabs.sendMessage(tabId, {
+      type: "GET_PAGE_STATUS",
+    } satisfies GetPageStatusMessage)) as CurrentPageStatus;
+
+    if (!response?.url) {
+      throw new Error("Missing page status response");
+    }
+
+    return {
+      status: "ready",
+      url: response.url,
+      disabled: response.disabled,
+      saving: false,
+    };
+  } catch {
+    return {
+      status: "unsupported",
+      url: null,
+      disabled: false,
+      saving: false,
+    };
+  }
+}
+
 export default function App() {
   const [state, setState] = useState<PopupState>({
     bank: null,
@@ -50,15 +100,36 @@ export default function App() {
   });
   const [plannerQueued, setPlannerQueued] = useState(false);
   const [profileExpanded, setProfileExpanded] = useState(false);
+  const [pageControl, setPageControl] = useState<PageControlState>({
+    status: "loading",
+    url: null,
+    disabled: false,
+    saving: false,
+  });
 
   const sliderValue = useMemo(
     () => thresholdToSliderValue(state.config.progressionThreshold),
     [state.config.progressionThreshold],
   );
+  const pageLabel = useMemo(() => {
+    if (!pageControl.url) {
+      return "";
+    }
+
+    try {
+      const url = new URL(pageControl.url);
+      return `${url.hostname}${url.pathname === "/" ? "" : url.pathname}`;
+    } catch {
+      return pageControl.url;
+    }
+  }, [pageControl.url]);
 
   useEffect(() => {
     const refresh = async () => {
-      const result = await chrome.storage.local.get([BANK_KEY, CONFIG_KEY, INTEREST_KEY, USER_CONTEXT_KEY]);
+      const [result, nextPageControl] = await Promise.all([
+        chrome.storage.local.get([BANK_KEY, CONFIG_KEY, INTEREST_KEY, USER_CONTEXT_KEY]),
+        getCurrentPageStatus(),
+      ]);
       const userContext = result[USER_CONTEXT_KEY] as Partial<UserContext> | undefined;
       setState({
         bank: (result[BANK_KEY] as PhraseBank | undefined) ?? null,
@@ -69,6 +140,10 @@ export default function App() {
         targetLanguage: userContext?.targetLanguage ?? "es",
         profile: (result[INTEREST_KEY] as UserInterestProfile | undefined) ?? null,
       });
+      setPageControl((current) => ({
+        ...nextPageControl,
+        saving: current.saving && current.url === nextPageControl.url ? current.saving : false,
+      }));
       setPlannerQueued(false);
     };
 
@@ -76,7 +151,11 @@ export default function App() {
     const listener = (changes: { [key: string]: chrome.storage.StorageChange }, area: string) => {
       if (
         area === "local" &&
-        (changes[BANK_KEY] || changes[CONFIG_KEY] || changes[INTEREST_KEY] || changes[USER_CONTEXT_KEY])
+        (changes[BANK_KEY] ||
+          changes[CONFIG_KEY] ||
+          changes[INTEREST_KEY] ||
+          changes[USER_CONTEXT_KEY] ||
+          changes[DISABLED_PAGES_KEY])
       ) {
         void refresh();
       }
@@ -112,6 +191,24 @@ export default function App() {
     });
   };
 
+  const handlePageToggle = async () => {
+    if (pageControl.status !== "ready" || !pageControl.url || pageControl.saving) {
+      return;
+    }
+
+    setPageControl((current) => ({
+      ...current,
+      saving: true,
+    }));
+
+    const disabled = await setPageDisabled(pageControl.url, !pageControl.disabled);
+    setPageControl((current) => ({
+      ...current,
+      disabled,
+      saving: false,
+    }));
+  };
+
   return (
     <main className="flex min-w-[320px] flex-col gap-4 bg-background p-4 text-foreground">
       <div className="space-y-1">
@@ -122,6 +219,46 @@ export default function App() {
           {state.bank?.phrases.length ?? 0} phrases ready.
         </p>
       </div>
+
+      <section className="rounded-lg border border-border bg-muted/30 p-3">
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-xs font-medium">This Page</p>
+            <p className="text-[11px] text-muted-foreground">
+              {pageControl.status === "ready"
+                ? pageControl.disabled
+                  ? "Gloss replacements and learning controls are paused here"
+                  : "Gloss replacements and learning controls are active here"
+                : "This tab cannot be modified"}
+            </p>
+          </div>
+          <Badge variant={pageControl.disabled ? "muted" : "success"}>
+            {pageControl.status === "ready" ? (pageControl.disabled ? "Paused" : "Active") : "Unavailable"}
+          </Badge>
+        </div>
+        {pageControl.status === "ready" ? (
+          <>
+            <p className="mt-2 truncate text-[11px] text-muted-foreground">{pageLabel}</p>
+            <Button
+              size="sm"
+              variant={pageControl.disabled ? "outline" : "secondary"}
+              onClick={() => void handlePageToggle()}
+              disabled={pageControl.saving}
+              className="mt-3 w-full justify-center"
+            >
+              {pageControl.saving
+                ? "Saving..."
+                : pageControl.disabled
+                  ? "Enable on this page"
+                  : "Pause on this page"}
+            </Button>
+          </>
+        ) : (
+          <p className="mt-2 text-[11px] text-muted-foreground">
+            Chrome internal pages and extension pages cannot be changed.
+          </p>
+        )}
+      </section>
 
       <section className="rounded-lg border border-border bg-muted/30 p-3">
         <div className="flex items-center justify-between">

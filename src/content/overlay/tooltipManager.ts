@@ -9,6 +9,7 @@ let activeSpan: HTMLElement | null = null;
 let activeConfig: ProgressionConfig | null = null;
 let listenersBound = false;
 let hideTimer: ReturnType<typeof setTimeout> | null = null;
+let hoverEnabled = true;
 
 function escapeHtml(value: string): string {
   return value
@@ -130,6 +131,23 @@ function scheduleHideTooltip(): void {
   }, 120);
 }
 
+function clearHoverTimers(): void {
+  for (const timer of hoverTimers.values()) {
+    clearTimeout(timer);
+  }
+
+  hoverTimers.clear();
+}
+
+export function setHoverListenersEnabled(enabled: boolean): void {
+  hoverEnabled = enabled;
+
+  if (!enabled) {
+    clearHoverTimers();
+    hideTooltip();
+  }
+}
+
 function showTooltip(span: HTMLElement): void {
   const tooltip = getTooltipEl();
   if (hideTimer) {
@@ -235,6 +253,10 @@ function fetchDefinition(
 }
 
 function handleMouseOver(event: MouseEvent): void {
+  if (!hoverEnabled) {
+    return;
+  }
+
   const target = event.target;
   if (!(target instanceof Element)) {
     return;
@@ -285,6 +307,11 @@ function handleMouseOver(event: MouseEvent): void {
 }
 
 function handleMouseOut(event: MouseEvent): void {
+  if (!hoverEnabled) {
+    hideTooltip();
+    return;
+  }
+
   const target = event.target;
   if (!(target instanceof Element)) {
     return;
