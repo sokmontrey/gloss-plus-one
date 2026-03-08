@@ -57,6 +57,64 @@ function sortBankPhrases(phrases: BankPhrase[]): BankPhrase[] {
   return [...phrases].sort((left, right) => right.addedAt - left.addedAt || right.lastSeenAt - left.lastSeenAt);
 }
 
+function getStageProgress(bank: PhraseBank | null, threshold: number): {
+  label: string;
+  progress: number;
+  averageConfidence: number;
+  phraseCount: number;
+} {
+  if (!bank) {
+    return {
+      label: "No progression data yet",
+      progress: 0,
+      averageConfidence: 0,
+      phraseCount: 0,
+    };
+  }
+
+  const latestBatch = [...bank.batches]
+    .reverse()
+    .find((batch) => batch.triggerReason === "initial" || batch.triggerReason === "progression");
+
+  if (!latestBatch) {
+    return {
+      label: "Waiting for first discovery batch",
+      progress: 0,
+      averageConfidence: 0,
+      phraseCount: 0,
+    };
+  }
+
+  const sample = bank.phrases
+    .filter((phrase) => phrase.addedByBatch === latestBatch.id)
+    .filter((phrase) => phrase.exposures > 0)
+    .sort((left, right) => {
+      const leftScore = left.lastSeenAt || left.addedAt;
+      const rightScore = right.lastSeenAt || right.addedAt;
+      return rightScore - leftScore;
+    })
+    .slice(0, 10);
+
+  if (sample.length === 0) {
+    return {
+      label: "Read with the newest phrases to unlock the next stage",
+      progress: 0,
+      averageConfidence: 0,
+      phraseCount: 0,
+    };
+  }
+
+  const averageConfidence = sample.reduce((sum, phrase) => sum + phrase.confidence, 0) / sample.length;
+  const progress = Math.max(0, Math.min(1, averageConfidence / Math.max(threshold, 0.01)));
+
+  return {
+    label: `${sample.length}/10 newest phrases tracked`,
+    progress,
+    averageConfidence,
+    phraseCount: sample.length,
+  };
+}
+
 export default function Dashboard() {
   const [state, setState] = useState<DashboardState>({
     bank: null,
@@ -70,6 +128,10 @@ export default function Dashboard() {
   const sliderValue = useMemo(
     () => thresholdToSliderValue(state.config.progressionThreshold),
     [state.config.progressionThreshold],
+  );
+  const stageProgress = useMemo(
+    () => getStageProgress(state.bank, state.config.progressionThreshold),
+    [state.bank, state.config.progressionThreshold],
   );
   const phrases = useMemo(() => sortBankPhrases(state.bank?.phrases ?? []), [state.bank]);
 
@@ -185,18 +247,32 @@ export default function Dashboard() {
           <div className="rounded-lg border border-border bg-muted/30 p-4">
             <div className="flex items-center justify-between">
               <div>
-                <h2 className="text-sm font-medium">Phrase Bank Level</h2>
+                <h2 className="text-sm font-medium">Stage Progress</h2>
                 <p className="text-xs text-muted-foreground">
-                  + adds the next tier, - removes the latest batch
+                  Read with the newest phrases to unlock the next stage
                 </p>
               </div>
               <Badge variant="warning">Tier {state.bank?.currentTier ?? 1}</Badge>
             </div>
+            
+            <div className="mt-4 flex flex-col gap-2">
+              <div className="h-2 overflow-hidden rounded-full bg-muted">
+                <div
+                  className="h-full rounded-full bg-primary transition-all"
+                  style={{ width: `${Math.round(stageProgress.progress * 100)}%` }}
+                />
+              </div>
+              <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+                <span>{stageProgress.label}</span>
+                <span>{Math.round(stageProgress.averageConfidence * 100)}%</span>
+              </div>
+            </div>
+
             <div className="mt-4 flex items-center gap-3">
               <Button size="icon" variant="outline" onClick={() => void handlePlanner("debug_decrement")}>
                 <Minus />
               </Button>
-              <div className="flex-1 text-center text-sm text-muted-foreground">
+              <div className="flex-1 text-center text-xs text-muted-foreground">
                 {phrases.length} phrases · {state.bank?.batches.length ?? 0} batches
                 {plannerQueued ? " · queued" : ""}
               </div>
@@ -286,17 +362,20 @@ export default function Dashboard() {
               <ScrollArea className="flex-1 rounded-md border border-border bg-muted/10">
                 <div className="p-4 space-y-2">
                   {state.assessmentHistory.map((entry) => (
-                    <div key={entry.id} className="rounded-lg border border-border bg-card p-4 shadow-sm">
-                      <div className="flex items-center justify-between gap-4">
+                    <div
+                      key={entry.id}
+                      className="flex flex-col gap-2 rounded-lg border border-border bg-card px-4 py-3 text-sm shadow-sm"
+                    >
+                      <div className="flex items-start justify-between gap-4">
                         <div className="font-medium text-[15px]">"{entry.phrase}"</div>
                         <Badge variant={entry.score >= 4 ? "default" : entry.score >= 2 ? "warning" : "muted"}>
                           {entry.score}/5
                         </Badge>
                       </div>
-                      <div className="mt-2 text-sm text-muted-foreground">
+                      <div className="text-muted-foreground">
                         <span className="opacity-70">Translation attempt:</span> "{entry.userTranslation}"
                       </div>
-                      <div className="mt-2 text-xs text-muted-foreground/50 text-right">
+                      <div className="text-right text-xs text-muted-foreground/50">
                         {new Date(entry.timestamp).toLocaleString()}
                       </div>
                     </div>
