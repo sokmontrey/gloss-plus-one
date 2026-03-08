@@ -353,27 +353,27 @@ export default function App() {
           <span className="text-xs text-muted-foreground">Phrase Bank Level</span>
           <Badge variant="warning">Tier {state.bank?.currentTier ?? 1}</Badge>
         </div>
-        <div className="mt-3 flex items-center gap-3">
+        <p className="mt-2 text-center text-xs text-muted-foreground">
+          {state.bank?.phrases.length ?? 0} phrases · {state.bank?.batches.length ?? 0} batches
+        </p>
+        <div className="mt-3 grid grid-cols-2 gap-2">
           <Button
             size="sm"
             variant="outline"
             onClick={() => void handlePlanner("debug_decrement")}
-            className="min-w-[112px] justify-center gap-2"
+            className="min-w-0 justify-center gap-1.5"
           >
-            <Minus />
-            Remove batch
+            <Minus className="shrink-0" />
+            <span className="truncate">Remove batch</span>
           </Button>
-          <div className="flex-1 text-center text-xs text-muted-foreground">
-            {state.bank?.phrases.length ?? 0} phrases · {state.bank?.batches.length ?? 0} batches
-          </div>
           <Button
             size="sm"
             onClick={() => void handlePlanner("debug_increment")}
             disabled={isPlanning}
-            className="min-w-[112px] justify-center gap-2"
+            className="min-w-0 justify-center gap-1.5"
           >
-            <Plus />
-            {isPlanning ? "Planning..." : "New batch"}
+            <Plus className="shrink-0" />
+            <span className="truncate">{isPlanning ? "Planning..." : "New batch"}</span>
           </Button>
         </div>
         <p className="mt-2 text-[11px] text-muted-foreground">Phrase count updates as new batches arrive.</p>
