@@ -21,7 +21,7 @@
     "page": "src/dashboard/index.html",
     "open_in_tab": true
   },
-  "permissions": ["storage"],
+  "permissions": ["storage", "tabs"],
   "host_permissions": [
     "https://generativelanguage.googleapis.com/*",
     "https://app.backboard.io/*",

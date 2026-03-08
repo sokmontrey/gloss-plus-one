@@ -23,6 +23,15 @@ export function normalizePageUrl(value: string): string | null {
   }
 }
 
+export function isToggleablePageUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return url.protocol === "http:" || url.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
 export function isPageDisabledInSnapshot(url: string, snapshot: unknown): boolean {
   const normalizedUrl = normalizePageUrl(url);
   if (!normalizedUrl) {

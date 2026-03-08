@@ -2,8 +2,12 @@ import { useEffect, useMemo, useState } from "react";
 import { ExternalLink, Minus, Plus } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { DISABLED_PAGES_KEY, setPageDisabled } from "@/shared/pageDisable";
-import type { CurrentPageStatus, GetPageStatusMessage } from "@/shared/messages";
+import {
+  DISABLED_PAGES_KEY,
+  isPageDisabled,
+  isToggleablePageUrl,
+  setPageDisabled,
+} from "@/shared/pageDisable";
 import type { PhraseBank, ProgressionConfig, UserContext, UserInterestProfile } from "@/shared/types";
 
 const BANK_KEY = "glossPhraseBank";
@@ -50,14 +54,24 @@ function openDashboard() {
   chrome.runtime.openOptionsPage?.() ?? chrome.tabs.create({ url: chrome.runtime.getURL("src/dashboard/index.html") });
 }
 
-async function getActiveTabId(): Promise<number | null> {
+async function getActiveTab(): Promise<chrome.tabs.Tab | null> {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  return typeof tab?.id === "number" ? tab.id : null;
+  return tab ?? null;
+}
+
+async function reloadActiveTab(): Promise<void> {
+  const tab = await getActiveTab();
+  if (typeof tab?.id !== "number") {
+    return;
+  }
+
+  await chrome.tabs.reload(tab.id);
 }
 
 async function getCurrentPageStatus(): Promise<PageControlState> {
-  const tabId = await getActiveTabId();
-  if (tabId === null) {
+  const tab = await getActiveTab();
+  const url = typeof tab?.url === "string" ? tab.url : null;
+  if (!url) {
     return {
       status: "unsupported",
       url: null,
@@ -66,29 +80,21 @@ async function getCurrentPageStatus(): Promise<PageControlState> {
     };
   }
 
-  try {
-    const response = (await chrome.tabs.sendMessage(tabId, {
-      type: "GET_PAGE_STATUS",
-    } satisfies GetPageStatusMessage)) as CurrentPageStatus;
-
-    if (!response?.url) {
-      throw new Error("Missing page status response");
-    }
-
-    return {
-      status: "ready",
-      url: response.url,
-      disabled: response.disabled,
-      saving: false,
-    };
-  } catch {
+  if (!isToggleablePageUrl(url)) {
     return {
       status: "unsupported",
-      url: null,
+      url,
       disabled: false,
       saving: false,
     };
   }
+
+  return {
+    status: "ready",
+    url,
+    disabled: await isPageDisabled(url),
+    saving: false,
+  };
 }
 
 export default function App() {
@@ -196,17 +202,23 @@ export default function App() {
       return;
     }
 
+    const nextDisabled = !pageControl.disabled;
     setPageControl((current) => ({
       ...current,
       saving: true,
     }));
 
-    const disabled = await setPageDisabled(pageControl.url, !pageControl.disabled);
+    const disabled = await setPageDisabled(pageControl.url, nextDisabled);
     setPageControl((current) => ({
       ...current,
       disabled,
       saving: false,
     }));
+
+    // Disabling should restore the page to its untouched DOM immediately.
+    if (disabled) {
+      await reloadActiveTab();
+    }
   };
 
   return (
