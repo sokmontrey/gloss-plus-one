@@ -9,8 +9,13 @@ import type { BankPhrase, UserContext } from "@/shared/types";
 const PROCESSED_URLS_KEY = "glossProcessedUrls";
 const MAX_DISCOVERY_URLS = 500;
 const MAX_TIER = 6;
-/** Max page text length sent to the LLM; avoids overload and single-phrase responses. */
+/** Max page text length sent to a single fallback prompt. */
 const PAGE_DISCOVERY_PROMPT_MAX_CHARS = 6_000;
+const PAGE_DISCOVERY_CHUNK_MAX_CHARS = 2_400;
+const PAGE_DISCOVERY_CHUNK_OVERLAP_CHARS = 250;
+const PAGE_DISCOVERY_MAX_CHUNKS = 3;
+const PAGE_DISCOVERY_MIN_RESULTS = 5;
+const PAGE_DISCOVERY_MAX_RESULTS = 8;
 
 function normalizePhrase(value: string): string {
   return value.replace(/\s+/g, " ").trim();
@@ -181,11 +186,162 @@ function getTierCefrBand(tier: number, fallback: UserContext["cefrBand"]): UserC
 
 export async function callPlannerLLM(prompt: string, responseMimeType = "application/json"): Promise<string> {
   try {
-    return await callGroq(prompt, responseMimeType);
-  } catch (error) {
-    console.warn("[GlossPlusOne:planner] Groq failed, trying Gemini:", error);
     return await callGemini(prompt, responseMimeType);
+  } catch (error) {
+    console.warn("[GlossPlusOne:planner] Gemini failed, trying Groq:", error);
+    return await callGroq(prompt, responseMimeType);
   }
+}
+
+interface DiscoveryPromptContext {
+  pageTitle: string;
+  language: string;
+  nativeLanguage: string;
+  cefrBand: UserContext["cefrBand"];
+  currentTier: number;
+  effectiveBand: UserContext["cefrBand"];
+  nextBand: UserContext["cefrBand"];
+  existingPhrases: string[];
+}
+
+interface DiscoveryCandidate {
+  phrase: string;
+  targetPhrase: string;
+  phraseType?: string;
+}
+
+function splitDiscoveryTextIntoChunks(text: string): string[] {
+  const normalized = text.replace(/\s+/g, " ").trim();
+  if (!normalized) {
+    return [];
+  }
+
+  if (normalized.length <= PAGE_DISCOVERY_CHUNK_MAX_CHARS) {
+    return [normalized];
+  }
+
+  const chunks: string[] = [];
+  let start = 0;
+  while (start < normalized.length && chunks.length < PAGE_DISCOVERY_MAX_CHUNKS) {
+    let end = Math.min(normalized.length, start + PAGE_DISCOVERY_CHUNK_MAX_CHARS);
+    if (end < normalized.length) {
+      const nextBoundary = Math.max(
+        normalized.lastIndexOf(". ", end),
+        normalized.lastIndexOf("! ", end),
+        normalized.lastIndexOf("? ", end),
+        normalized.lastIndexOf(" ", end),
+      );
+      if (nextBoundary > start + Math.floor(PAGE_DISCOVERY_CHUNK_MAX_CHARS * 0.6)) {
+        end = nextBoundary + 1;
+      }
+    }
+
+    const chunk = normalized.slice(start, end).trim();
+    if (chunk) {
+      chunks.push(chunk);
+    }
+
+    if (end >= normalized.length) {
+      break;
+    }
+
+    start = Math.max(end - PAGE_DISCOVERY_CHUNK_OVERLAP_CHARS, start + 1);
+  }
+
+  return chunks;
+}
+
+function buildPageDiscoveryPrompt(
+  excerpt: string,
+  context: DiscoveryPromptContext,
+  chunkIndex?: number,
+  chunkCount?: number,
+): string {
+  const chunkLabel =
+    chunkCount && chunkCount > 1
+      ? `\nChunk: ${chunkIndex ?? 1}/${chunkCount}. Select phrases only from this chunk.`
+      : "";
+
+  return `You are a language teacher selecting vocabulary for a ${context.cefrBand} learner.
+Native language: ${context.nativeLanguage}
+Target language: ${context.language}
+Current discovery tier: ${context.currentTier} (${context.effectiveBand})
+Target difficulty for new discoveries: approximately i+1 (${context.nextBand})${chunkLabel}
+
+Page title: "${context.pageTitle}"
+Page content excerpt:
+"${excerpt}"
+
+Phrases already in the learner's bank (DO NOT repeat these):
+${context.existingPhrases.slice(-40).map((phrase) => `"${phrase}"`).join(", ")}
+
+Select exactly 5 to 8 phrases from the page content above. You must return at least 5 phrases unless the excerpt contains fewer than 5 suitable candidates. Each phrase must be:
+- Worth learning at approximately one step above the current bank (${context.nextBand})
+- Actually present in the text above (or close variants)
+- Not already in the bank list above
+- 1-5 words each
+
+Prioritize in this order:
+1. Structural phrases and grammar chunks that support comprehension and feel like Krashen i+1
+2. High-frequency discourse connectors, clause frames, modal/purpose/cause phrases
+3. Lexical phrases only when the excerpt does not contain enough good structural candidates
+
+Avoid random niche vocabulary, proper nouns, fragmented text, or phrases that are much harder than ${context.nextBand}.
+Prefer phrases that make sense as the learner's next step from the current bank.
+If possible, return mostly structural phrases and mark them with "phraseType": "structural".
+
+Return a JSON array only. No markdown, no explanation. Start with [. Include 5-8 objects.
+[
+  { "phrase": "raises concerns", "targetPhrase": "soulève des préoccupations", "phraseType": "lexical" },
+  { "phrase": "for example", "targetPhrase": "par exemple", "phraseType": "structural" }
+]`;
+}
+
+async function collectGeminiDiscoveryCandidates(
+  pageText: string,
+  context: DiscoveryPromptContext,
+): Promise<DiscoveryCandidate[]> {
+  const chunks = splitDiscoveryTextIntoChunks(pageText);
+  if (chunks.length === 0) {
+    return [];
+  }
+
+  console.log("[GlossPlusOne:planner] Running Gemini chunked discovery", {
+    chunkCount: chunks.length,
+    chunkLengths: chunks.map((chunk) => chunk.length),
+  });
+
+  const aggregated: DiscoveryCandidate[] = [];
+  const seen = new Set<string>();
+
+  for (const [index, chunk] of chunks.entries()) {
+    const prompt = buildPageDiscoveryPrompt(chunk, context, index + 1, chunks.length);
+    const raw = await callGemini(prompt);
+    console.log("[GlossPlusOne:planner] Page discovery raw Gemini chunk response:", {
+      chunk: `${index + 1}/${chunks.length}`,
+      raw,
+    });
+
+    const parsed = parseJsonResponse(raw) as DiscoveryCandidate[];
+    if (!Array.isArray(parsed)) {
+      continue;
+    }
+
+    for (const phrase of parsed) {
+      const normalizedPhrase = normalizePhraseKey(phrase.phrase ?? "");
+      if (!normalizedPhrase || seen.has(normalizedPhrase)) {
+        continue;
+      }
+
+      seen.add(normalizedPhrase);
+      aggregated.push(phrase);
+      if (aggregated.length >= PAGE_DISCOVERY_MAX_RESULTS) {
+        return aggregated;
+      }
+    }
+  }
+
+  return aggregated;
 }
 
 export async function runPlanner(triggerReason: TriggerPlannerReason, language: string): Promise<void> {
@@ -424,53 +580,37 @@ export async function runPageDiscovery(
   const nextBand = getTierCefrBand(Math.min(bank.currentTier + 1, MAX_TIER), userContext.cefrBand);
 
   const excerpt = pageText.slice(0, PAGE_DISCOVERY_PROMPT_MAX_CHARS);
-  const truncatedNote =
-    pageText.length > PAGE_DISCOVERY_PROMPT_MAX_CHARS
-      ? ` (excerpt: first ${PAGE_DISCOVERY_PROMPT_MAX_CHARS} chars of ${pageText.length} total)`
-      : "";
-
-  const prompt = `You are a language teacher selecting vocabulary for a ${userContext.cefrBand} learner.
-Native language: ${userContext.nativeLanguage}
-Target language: ${language}
-Current discovery tier: ${bank.currentTier} (${effectiveBand})
-Target difficulty for new discoveries: approximately i+1 (${nextBand})
-
-Page title: "${pageTitle}"
-Page content${truncatedNote}:
-"${excerpt}"
-
-Phrases already in the learner's bank (DO NOT repeat these):
-${existingPhrases.slice(-40).map((phrase) => `"${phrase}"`).join(", ")}
-
-Select exactly 5 to 8 phrases from the page content above. You must return at least 5 phrases unless the excerpt contains fewer than 5 suitable candidates. Each phrase must be:
-- Worth learning at approximately one step above the current bank (${nextBand})
-- Actually present in the text above (or close variants)
-- Not already in the bank list above
-- 1-5 words each
-
-Prioritize in this order:
-1. Structural phrases and grammar chunks that support comprehension and feel like Krashen i+1
-2. High-frequency discourse connectors, clause frames, modal/purpose/cause phrases
-3. Lexical phrases only when the excerpt does not contain enough good structural candidates
-
-Avoid random niche vocabulary, proper nouns, fragmented text, or phrases that are much harder than ${nextBand}.
-Prefer phrases that make sense as the learner's next step from the current bank.
-If possible, return mostly structural phrases and mark them with "phraseType": "structural".
-
-Return a JSON array only. No markdown, no explanation. Start with [. Include 5-8 objects.
-[
-  { "phrase": "raises concerns", "targetPhrase": "soulève des préoccupations", "phraseType": "lexical" },
-  { "phrase": "for example", "targetPhrase": "par exemple", "phraseType": "structural" }
-]`;
+  const promptContext: DiscoveryPromptContext = {
+    pageTitle,
+    language,
+    nativeLanguage: userContext.nativeLanguage,
+    cefrBand: userContext.cefrBand,
+    currentTier: bank.currentTier,
+    effectiveBand,
+    nextBand,
+    existingPhrases,
+  };
 
   try {
-    const raw = await callPlannerLLM(prompt);
-    console.log("[GlossPlusOne:planner] Page discovery raw response:", raw);
-    const parsed = parseJsonResponse(raw) as Array<{
-      phrase: string;
-      targetPhrase: string;
-      phraseType?: string;
-    }>;
+    let parsed: DiscoveryCandidate[] = [];
+    try {
+      parsed = await collectGeminiDiscoveryCandidates(pageText, promptContext);
+      if (parsed.length < PAGE_DISCOVERY_MIN_RESULTS) {
+        console.warn("[GlossPlusOne:planner] Gemini chunked discovery returned too few phrases, trying Groq fallback", {
+          count: parsed.length,
+        });
+        const fallbackPrompt = buildPageDiscoveryPrompt(excerpt, promptContext);
+        const raw = await callGroq(fallbackPrompt);
+        console.log("[GlossPlusOne:planner] Page discovery raw Groq fallback response:", raw);
+        parsed = parseJsonResponse(raw) as DiscoveryCandidate[];
+      }
+    } catch (geminiError) {
+      console.warn("[GlossPlusOne:planner] Gemini chunked discovery failed, trying Groq fallback", geminiError);
+      const fallbackPrompt = buildPageDiscoveryPrompt(excerpt, promptContext);
+      const raw = await callGroq(fallbackPrompt);
+      console.log("[GlossPlusOne:planner] Page discovery raw Groq fallback response:", raw);
+      parsed = parseJsonResponse(raw) as DiscoveryCandidate[];
+    }
 
     if (!Array.isArray(parsed) || parsed.length === 0) {
       console.warn("[GlossPlusOne:planner] Page discovery returned empty");
