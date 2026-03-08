@@ -3,17 +3,21 @@
 <div align="center">
 A Chrome browser extension for immersive language learning<br>
 Built at Hack Canada 2026 🇨🇦
-
-*(Images/Demo would go here)*
 </div>
 
 ## 🌟 Overview
-GlossPlusOne is an intelligent language learning overlay that transforms your everyday browsing into an immersive language learning experience. Simply highlight text on any webpage to get instant translations, pronunciations, contextual definitions, and interactive self-assessment challenges.
+GlossPlusOne is an intelligent language learning overlay that transforms your everyday browsing into an immersive language learning experience. 
+
+## What's this random ahh sounding name?
+Let's address this. 
+- Gloss = the saying of "glossing over something"
+- Plus One = Krashen's i + 1 Hypothesis (Input Hypothesis)
 
 ## ✨ Key Features
 - 🔍 **Instant Translation Overlay** - Highlight any text to see translations with contextual definitions
 - 🗣️ **Text-to-Speech Pronunciation** - Hear native pronunciations for words and phrases
 - 📚 **AI-Powered Glossary** - Context-aware definitions powered by Gemini and Groq
+- 🧠 **Continuous Memory** - Language progress syncs continuously with an AI assistant through Backboard
 - 🎯 **Self-Assessment "Try Out" Mode** - Select English text sections and test your translation skills
 - 🎮 **Gamified Learning** - Earn scores and track your progress as you learn
 - 🌍 **Multi-Language Support** - Learn multiple languages while browsing naturally
@@ -38,11 +42,12 @@ GlossPlusOne is an intelligent language learning overlay that transforms your ev
   - Google Gemini API Key
   - Groq API Key
   - ElevenLabs API Key
+  - Backboard API Key and Assistant ID
 
 ### Installation & Configuration
 1. Clone the repository:
    ```bash
-   git clone https://github.com/yourusername/gloss-plus-one.git
+   git clone https://github.com/sokmontrey/gloss-plus-one.git
    cd gloss-plus-one
    ```
 2. Install dependencies:
@@ -54,6 +59,8 @@ GlossPlusOne is an intelligent language learning overlay that transforms your ev
    VITE_GEMINI_API_KEY=your_gemini_key_here
    VITE_GROQ_API_KEY=your_groq_key_here
    VITE_ELEVENLABS_API_KEY=your_elevenlabs_key_here
+   VITE_BACKBOARD_API_KEY=your_backboard_key_here
+   VITE_BACKBOARD_ASSISTANT_ID=your_backboard_assistant_id_here
    ```
 
 ## 💻 Development
@@ -97,6 +104,9 @@ Hover or click highlighted text to see instant translations with contextual defi
 ### AI-Powered Learning
 Our integration with Gemini and Groq provides intelligent, context-aware definitions that adapt to your learning level. The structural translations help parse sentence flow visually.
 
+### Continuous Progress Memory
+GlossPlusOne automatically generates progress reports indicating which phrases you know well, what you are reinforcing, and what you are struggling with. This is continuously synced to a backend assistant thread via **Backboard** (`https://app.backboard.io/api`), ensuring long-term learning memory.
+
 ### Self-Assessment Mode
 Transform passive learning into active practice:
 1. Select any section of English text
@@ -135,18 +145,23 @@ Distributed under the MIT License. See `LICENSE` for more information.
 Built with ❤️ at Hack Canada 2026
 
 **Team**
-- Team Member 1 - Full Stack Developer / AI Integrations
-- Team Member 2 - UI/UX Designer / Extension Architecture
-- Team Member 3 - Prompt Engineering
+- Me, I, myself, and a will to love.
 
 ### 🙏 Acknowledgments
-- ElevenLabs for text-to-speech capabilities
-- Google Gemini for AI-powered definitions
-- Groq for fast inference fallback
-- The Hack Canada 2026 organizers and sponsors
+- The Hack Canada 2026 organizers and sponsors. You guys are cooking.
+- Our HuskyHack Gang from GBP. Thanks for making this adventure less lonely.
 
 ## 📧 Contact
 For support or questions, feel free to open an issue or reach out to the project maintainers!
+
+## Future of GlossPlusOne
+- Polish the current text extraction to minimize token input that's being sent to an llm
+- Implement additional frictionless assessment Pronunciation practice assessment: Use state of the art speech analysis service to provide user with quick pronunciation correction for phrases
+- Implement a better webpage content extraction that be able to determine better words and phrase
+- Implement a more comprehensive agentic user context (memory) management, concrete data grounding to avoid hallucination  
+- Deal with Right-To-Left language (RTL) (Arabic)
+- Even the definition itself will become more and more the target language as the user aquired necessary words or phrase to explain them.
+- Make everything production ready with centralize server for more efficient processing, word bank generation (can be reuse across user with similar preference), and informed replacement
 
 <div align="center">
 Happy Learning! 🌍📚<br>
