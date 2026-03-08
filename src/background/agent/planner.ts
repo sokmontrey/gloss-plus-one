@@ -1,385 +1,220 @@
-import { callBackboard } from "@/background/api/backboard";
-import { callGroq } from "@/background/api/groq";
-import { calculateBudget } from "@/background/agent/budget";
-import { buildReplacementPrompt } from "@/background/agent/prompt";
-import {
-  getEffectiveSeenPhrasesForLanguage,
-  getPhraseState,
-  seedFoundationalPhrases,
-} from "@/background/memory/phraseStore";
-import { getUserContext } from "@/background/memory/store";
-import type { SerializablePageContent } from "@/shared/messages";
-import type {
-  ArticleContext,
-  ExtractedParagraph,
-  PhraseMemory,
-  PlannedReplacement,
-  ReplacementBudget,
-  ReplacementManifest,
-  ReplacementPlan,
-  UserContext,
-} from "@/shared/types";
+import { callGemini } from "../api/gemini";
+import { callGroq } from "../api/groq";
+import { getPhraseBank, removeLastBatch, savePhraseBank } from "../memory/bankStore";
+import { getUserContext } from "../memory/store";
+import type { TriggerPlannerReason } from "@/shared/messages";
+import type { BankPhrase, PhraseBank, UserContext } from "@/shared/types";
 
-const MODEL_USED = "groq/llama-3.3-70b-versatile";
-
-function normalizeText(text: string): string {
-  return text
-    .toLowerCase()
-    .replace(/[\u2018\u2019\u201C\u201D]/g, "'")
-    .replace(/\s+/g, " ")
-    .trim();
+interface RawPlannerPhrase {
+  phrase: string;
+  targetPhrase: string;
+  phraseType: "structural" | "lexical";
+  pedagogicalNote?: string;
 }
 
-function stripMarkdownFences(raw: string): string {
-  const trimmed = raw.trim();
-
-  if (!trimmed.startsWith("```")) {
-    return trimmed;
-  }
-
-  return trimmed.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
+function stripMarkdownFences(value: string): string {
+  return value.replace(/```json|```/gi, "").trim();
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
+function normalizePhrase(value: string): string {
+  return value.replace(/\s+/g, " ").trim();
 }
 
-function isArticleContext(value: unknown): value is ArticleContext {
-  if (!isRecord(value)) {
+function isRawPlannerPhrase(value: unknown): value is RawPlannerPhrase {
+  if (!value || typeof value !== "object") {
     return false;
   }
 
+  const candidate = value as Record<string, unknown>;
   return (
-    typeof value.topic === "string" &&
-    typeof value.register === "string" &&
-    ["formal", "informal", "academic", "casual"].includes(value.register) &&
-    typeof value.vocabularyDomain === "string" &&
-    typeof value.estimatedReadingLevel === "string"
+    typeof candidate.phrase === "string" &&
+    typeof candidate.targetPhrase === "string" &&
+    (candidate.phraseType === "structural" || candidate.phraseType === "lexical")
   );
 }
 
-function isPlannedReplacement(value: unknown): value is PlannedReplacement {
-  if (!isRecord(value)) {
-    return false;
+export async function callPlannerLLM(prompt: string, responseMimeType = "application/json"): Promise<string> {
+  try {
+    return await callGemini(prompt, responseMimeType);
+  } catch (error) {
+    console.warn("[GlossPlusOne:planner] Gemini failed, trying Groq:", error);
+    return await callGroq(prompt, responseMimeType);
   }
-
-  return (
-    typeof value.targetPhrase === "string" &&
-    typeof value.foreignPhrase === "string" &&
-    typeof value.translation === "string" &&
-    typeof value.targetLanguage === "string" &&
-    typeof value.difficultyLevel === "number" &&
-    typeof value.replacementType === "string" &&
-    ["vocabulary", "phrase", "grammar_structure"].includes(value.replacementType) &&
-    typeof value.pedagogicalReason === "string" &&
-    typeof value.paragraphIndex === "number" &&
-    typeof value.caseSensitive === "boolean" &&
-    (typeof value.confidence === "undefined" || typeof value.confidence === "number") &&
-    (typeof value.isReinforcement === "undefined" || typeof value.isReinforcement === "boolean")
-  );
 }
 
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-function parseManifest(
-  raw: string,
-  userContext: UserContext,
-  budget: ReplacementBudget,
-): ReplacementManifest {
-  const normalized = stripMarkdownFences(raw);
-  console.log("[GlossPlusOne:planner] Raw manifest text:", raw);
-  console.log("[GlossPlusOne:planner] Normalzeda text:", normalized);
-  const parsed = JSON.parse(normalized) as unknown;
-
-  if (!isRecord(parsed)) {
-    throw new Error("MANIFEST_INVALID_TOP_LEVEL");
+export async function runPlanner(triggerReason: TriggerPlannerReason, language: string): Promise<void> {
+  if (triggerReason === "debug_decrement") {
+    await removeLastBatch(language);
+    return;
   }
 
-  if (!isArticleContext(parsed.articleContext)) {
-    throw new Error("MANIFEST_MISSING_ARTICLE_CONTEXT");
+  const [bank, userContext] = await Promise.all([getPhraseBank(language), getUserContext()]);
+  const batchId = crypto.randomUUID();
+  const nextTier = triggerReason === "initial" ? 1 : bank.currentTier + 1;
+  const newPhrases = await generatePhraseBatch(bank, userContext, nextTier, batchId, triggerReason, language);
+
+  if (newPhrases.length === 0) {
+    console.warn("[GlossPlusOne:planner] Planner returned empty batch");
+    return;
   }
 
-  const rawReplacements = parsed.replacements;
-  if (!Array.isArray(rawReplacements)) {
-    console.warn("[GlossPlusOne:planner] Manifest missing replacements array");
-    console.warn("[GlossPlusOne:planner] Parsed manifest keys:", Object.keys(parsed));
-
-    return {
-      articleContext: parsed.articleContext,
-      userContext,
-      budget,
-      replacements: [],
-      generatedAt: Date.now(),
-      modelUsed: MODEL_USED,
-    };
-  }
-
-  const replacements = rawReplacements.filter(isPlannedReplacement);
-  if (rawReplacements.length > 0 && replacements.length === 0) {
-    console.warn(
-      `[GlossPlusOne:planner] Manifest replacements invalid: kept ${replacements.length} of ${rawReplacements.length}`,
-    );
-    console.warn("[GlossPlusOne:planner] Raw replacements:", rawReplacements);
-  }
-
-  return {
-    articleContext: parsed.articleContext,
-    userContext,
-    budget,
-    replacements,
-    generatedAt: Date.now(),
-    modelUsed: MODEL_USED,
-  };
-}
-
-function validateManifest(
-  manifest: ReplacementManifest,
-  paragraphs: SerializablePageContent["paragraphs"],
-): { kept: PlannedReplacement[]; discarded: number } {
-  if (manifest.replacements.length === 0) {
-    return { kept: [], discarded: 0 };
-  }
-
-  const validated = manifest.replacements.filter((replacement) => {
-    const paragraph = paragraphs.find((candidate) => candidate.index === replacement.paragraphIndex);
-
-    if (!paragraph) {
-      console.warn(
-        `[GlossPlusOne:planner] Discard — no paragraph at index ${replacement.paragraphIndex}`,
-        `| available indices: ${paragraphs.map((candidate) => candidate.index).join(", ")}`,
-      );
-      return false;
-    }
-
-    const normalizedParagraph = normalizeText(paragraph.text);
-    const normalizedPhrase = normalizeText(replacement.targetPhrase);
-    const found = normalizedParagraph.includes(normalizedPhrase);
-
-    if (!found) {
-      console.warn(
-        `[GlossPlusOne:planner] Discard — phrase not found: "${replacement.targetPhrase}"`,
-        `\n  paragraph[${replacement.paragraphIndex}] first 100 chars: "${paragraph.text.slice(0, 100)}"`,
-      );
-    } else {
-      console.log(
-        `[GlossPlusOne:planner] Keep — "${replacement.targetPhrase}" → "${replacement.foreignPhrase}"`,
-      );
-    }
-
-    return found;
+  bank.phrases.push(...newPhrases);
+  bank.currentTier = nextTier;
+  bank.lastPlannerRunAt = Date.now();
+  bank.lastBatchId = batchId;
+  bank.batches.push({
+    id: batchId,
+    addedAt: Date.now(),
+    tier: nextTier,
+    triggerReason,
+    phraseCount: newPhrases.length,
+    plannerContext: `Tier ${nextTier} batch for ${language}`,
   });
 
-  if (validated.length === 0) {
-    console.warn("[GlossPlusOne:planner] All replacements failed validation");
-    console.warn(
-      "[GlossPlusOne:planner] Paragraphs available:",
-      paragraphs.map((paragraph) => ({ index: paragraph.index, preview: paragraph.text.slice(0, 60) })),
-    );
-    return { kept: [], discarded: manifest.replacements.length };
-  }
-
-  return { kept: validated, discarded: manifest.replacements.length - validated.length };
-}
-
-function groupByParagraph(
-  replacements: PlannedReplacement[],
-  paragraphs: SerializablePageContent["paragraphs"],
-): ReplacementPlan[] {
-  const paragraphLookup = new Map(paragraphs.map((paragraph) => [paragraph.index, paragraph.text]));
-  const grouped = new Map<number, PlannedReplacement[]>();
-
-  for (const replacement of replacements) {
-    const existing = grouped.get(replacement.paragraphIndex);
-
-    if (existing) {
-      existing.push(replacement);
-      continue;
-    }
-
-    grouped.set(replacement.paragraphIndex, [replacement]);
-  }
-
-  return [...grouped.entries()]
-    .sort(([leftIndex], [rightIndex]) => leftIndex - rightIndex)
-    .map(([paragraphIndex, paragraphReplacements]) => ({
-      paragraphIndex,
-      originalText: paragraphLookup.get(paragraphIndex) ?? "",
-      replacements: paragraphReplacements,
-    }));
-}
-
-function buildSeenPhraseReplacements(
-  paragraphs: SerializablePageContent["paragraphs"],
-  seenPhrases: PhraseMemory[],
-): PlannedReplacement[] {
-  const results: PlannedReplacement[] = [];
-
-  for (const paragraph of paragraphs) {
-    const normalizedText = paragraph.text.toLowerCase();
-
-    for (const seen of seenPhrases) {
-      const normalizedPhrase = seen.phrase.toLowerCase().trim();
-      if (!normalizedText.includes(normalizedPhrase)) continue;
-
-      const regex = new RegExp(`\\b${escapeRegExp(normalizedPhrase)}\\b`, "i");
-      if (!regex.test(paragraph.text)) continue;
-
-      results.push({
-        targetPhrase: seen.phrase,
-        foreignPhrase: seen.targetPhrase,
-        translation: seen.phrase,
-        targetLanguage: seen.targetLanguage,
-        difficultyLevel: 1,
-        replacementType: seen.phraseType === "structural" ? "grammar_structure" : "vocabulary",
-        pedagogicalReason: `reinforcement - confidence ${(seen.confidence * 100).toFixed(0)}%`,
-        paragraphIndex: paragraph.index,
-        caseSensitive: false,
-        confidence: seen.confidence,
-        isReinforcement: true,
-      });
-    }
-  }
-
-  return results;
-}
-
-/**
- * Remaining budget for new discovery: only reinforcement phrases at or above progression threshold
- * count as "filling" the budget. Lower-confidence reinforcement still shows but doesn't block new phrases.
- */
-function remainingBudgetForDiscovery(
-  seenReplacements: PlannedReplacement[],
-  budget: ReplacementBudget,
-  progressionThreshold: number,
-): number {
-  const seenCountByParagraph = new Map<number, number>();
-  for (const replacement of seenReplacements) {
-    if (!replacement.isReinforcement || (replacement.confidence ?? 0) < progressionThreshold) continue;
-    seenCountByParagraph.set(
-      replacement.paragraphIndex,
-      (seenCountByParagraph.get(replacement.paragraphIndex) ?? 0) + 1,
-    );
-  }
-  return Object.entries(budget.perParagraph).reduce((sum, [paragraphIndex, limit]) => {
-    return sum + Math.max(0, limit - (seenCountByParagraph.get(Number(paragraphIndex)) ?? 0));
-  }, 0);
-}
-
-function filterNewReplacements(
-  replacements: PlannedReplacement[],
-  seenReplacements: PlannedReplacement[],
-  budget: ReplacementBudget,
-): PlannedReplacement[] {
-  const seenPhraseKeys = new Set(
-    seenReplacements.map(
-      (replacement) => `${replacement.paragraphIndex}:${replacement.targetPhrase.toLowerCase().trim()}`,
-    ),
+  await savePhraseBank(bank);
+  console.log(
+    `[GlossPlusOne:planner] Bank updated — added ${newPhrases.length} phrases at tier ${nextTier} (${triggerReason})`,
   );
-  const seenCounts = new Map<number, number>();
-  for (const replacement of seenReplacements) {
-    seenCounts.set(replacement.paragraphIndex, (seenCounts.get(replacement.paragraphIndex) ?? 0) + 1);
-  }
-
-  const perParagraphAdded = new Map<number, number>();
-  const kept: PlannedReplacement[] = [];
-
-  for (const replacement of replacements) {
-    const phraseKey = `${replacement.paragraphIndex}:${replacement.targetPhrase.toLowerCase().trim()}`;
-    if (seenPhraseKeys.has(phraseKey)) {
-      continue;
-    }
-
-    const seenCount = seenCounts.get(replacement.paragraphIndex) ?? 0;
-    const alreadyAdded = perParagraphAdded.get(replacement.paragraphIndex) ?? 0;
-    const paragraphBudget = budget.perParagraph[replacement.paragraphIndex] ?? 0;
-    const remaining = Math.max(0, paragraphBudget - seenCount);
-    if (alreadyAdded >= remaining) {
-      continue;
-    }
-
-    perParagraphAdded.set(replacement.paragraphIndex, alreadyAdded + 1);
-    kept.push({ ...replacement, isReinforcement: false });
-  }
-
-  return kept;
 }
 
-async function discoverNewPhrases(
-  content: SerializablePageContent,
+async function generatePhraseBatch(
+  bank: PhraseBank,
   userContext: UserContext,
-  seenPhrases: PhraseMemory[],
-  budget: ReplacementBudget,
-): Promise<PlannedReplacement[]> {
-  const prompt = buildReplacementPrompt(
-    content.paragraphs,
-    userContext,
-    {
-      title: content.title,
-      domain: content.domain,
-      pageType: content.pageType,
-    },
-    budget,
-    seenPhrases,
-  );
+  tier: number,
+  batchId: string,
+  triggerReason: TriggerPlannerReason,
+  language: string,
+): Promise<BankPhrase[]> {
+  const existingPhrases = bank.phrases.map((phrase) => normalizePhrase(phrase.phrase).toLowerCase());
+  const existingSet = new Set(existingPhrases);
+  const prompt =
+    tier >= 4
+      ? buildExplorationPrompt(userContext, existingPhrases, language, tier)
+      : buildStructuralPrompt(userContext, existingPhrases, language, tier);
 
-  void callBackboard;
-  console.log("[GlossPlusOne:planner] Groq call started");
-  const startedAt = Date.now();
-  const rawResponse = await callGroq(prompt);
-  console.log(`[GlossPlusOne:planner] Groq responded — ${Date.now() - startedAt}ms`);
+  console.log(`[GlossPlusOne:planner] Generating tier ${tier} batch for ${language} (${triggerReason})`);
 
-  const manifest = parseManifest(rawResponse, userContext, budget);
-  const { kept, discarded } = validateManifest(manifest, content.paragraphs);
-  console.log(`[GlossPlusOne:planner] Validated: ${kept.length} kept, ${discarded} discarded`);
-  return kept;
-}
-
-export async function buildReplacementPlans(
-  content: SerializablePageContent,
-): Promise<ReplacementPlan[]> {
   try {
-    console.log(
-      `[GlossPlusOne:planner] REQUEST received - ${content.paragraphs.length} paragraphs, ${content.pageType}, ${content.domain}`,
-    );
+    const raw = await callPlannerLLM(prompt);
+    const parsed = parsePlannerResponse(raw);
+    const now = Date.now();
 
-    if (content.paragraphs.length === 0) {
-      console.warn("[GlossPlusOne:planner] No paragraphs available; skipping plan build");
-      return [];
-    }
-
-    const [userContext, phraseState] = await Promise.all([getUserContext(), getPhraseState()]);
-    const progressionThreshold = Math.max(0, Math.min(1, userContext.progressionThreshold ?? 0.6));
-    const debugLevel = Math.max(0, Math.min(1, userContext.debugLearnerLevel ?? 0));
-
-    if (debugLevel >= 0.9) {
-      await seedFoundationalPhrases(userContext.targetLanguage);
-    }
-
-    const seenPhrases = await getEffectiveSeenPhrasesForLanguage(
-      userContext.targetLanguage,
-      debugLevel,
-    );
-    const extractedParagraphs = content.paragraphs as unknown as ExtractedParagraph[];
-    const budget = calculateBudget(extractedParagraphs, userContext);
-    console.log(`[GlossPlusOne:planner] Budget: ${budget.totalBudget} total replacements`);
-
-    const seenReplacements = buildSeenPhraseReplacements(content.paragraphs, seenPhrases);
-    const remainingBudget = remainingBudgetForDiscovery(
-      seenReplacements,
-      budget,
-      progressionThreshold,
-    );
-    const discoveredReplacements =
-      remainingBudget > 0 ? await discoverNewPhrases(content, userContext, seenPhrases, budget) : [];
-    const newReplacements = filterNewReplacements(discoveredReplacements, seenReplacements, budget);
-    const plans = groupByParagraph([...seenReplacements, ...newReplacements], content.paragraphs);
-    console.log(`[GlossPlusOne:planner] PLAN_READY - ${plans.length} ReplacementPlans`);
-
-    return plans;
+    return parsed
+      .map((phrase) => ({
+        id: crypto.randomUUID(),
+        phrase: normalizePhrase(phrase.phrase),
+        targetPhrase: normalizePhrase(phrase.targetPhrase),
+        targetLanguage: language,
+        nativeLanguage: userContext.nativeLanguage,
+        phraseType: phrase.phraseType,
+        tier,
+        addedAt: now,
+        addedByBatch: batchId,
+        confidence: 0,
+        exposures: 0,
+        hoverCount: 0,
+        lastSeenAt: 0,
+        firstSeenUrl: "",
+        firstSeenTitle: "",
+      }))
+      .filter((phrase) => phrase.phrase.length > 0 && phrase.targetPhrase.length > 0)
+      .filter((phrase) => !existingSet.has(phrase.phrase.toLowerCase()));
   } catch (error) {
-    console.warn("[GlossPlusOne:planner] Failed to build replacement plans", error);
+    console.error("[GlossPlusOne:planner] Batch generation failed:", error);
     return [];
   }
+}
+
+function parsePlannerResponse(raw: string): RawPlannerPhrase[] {
+  const clean = stripMarkdownFences(raw);
+  const parsed = JSON.parse(clean) as unknown;
+  const payload = Array.isArray(parsed)
+    ? parsed
+    : typeof parsed === "object" && parsed !== null && Array.isArray((parsed as Record<string, unknown>).phrases)
+      ? ((parsed as Record<string, unknown>).phrases as unknown[])
+      : [];
+
+  return payload.filter(isRawPlannerPhrase);
+}
+
+function buildStructuralPrompt(
+  userContext: UserContext,
+  existing: string[],
+  language: string,
+  tier: number,
+): string {
+  const tierLabel = ["", "A1", "A2", "B1", "B2", "C1", "C2"][tier] ?? "B1";
+
+  return `
+You are building a language acquisition phrase bank for a learner.
+Native language: ${userContext.nativeLanguage}
+Target language: ${language}
+Current tier: ${tierLabel}
+
+ALREADY IN BANK (do NOT include these):
+${existing.length > 0 ? existing.map((phrase) => `  "${phrase}"`).join("\n") : "  none yet"}
+
+Generate exactly 12 structural phrases appropriate for ${tierLabel} level.
+These are multi-word chunks that demonstrate grammar patterns.
+Focus on: discourse connectors, copula constructions, existential frames,
+modal phrases, purpose/cause structures, question formations.
+
+Rules:
+- Phrases must be 1-4 words
+- Must appear frequently in written English
+- Must NOT be in the already-in-bank list
+- Generate the most natural ${language} equivalent (not literal translation)
+- phraseType should always be "structural"
+
+Return ONLY valid JSON array, no markdown, no explanation:
+[
+  {
+    "phrase": "this is",
+    "targetPhrase": "esto es",
+    "phraseType": "structural",
+    "pedagogicalNote": "copula with demonstrative"
+  }
+]`;
+}
+
+function buildExplorationPrompt(
+  userContext: UserContext,
+  existing: string[],
+  language: string,
+  tier: number,
+): string {
+  const tierLabel = ["", "A1", "A2", "B1", "B2", "C1", "C2"][tier] ?? "B2";
+
+  return `
+You are building a lexical exploration phrase bank for an advanced learner.
+Native language: ${userContext.nativeLanguage}
+Target language: ${language}
+Current tier: ${tierLabel}
+
+ALREADY IN BANK (do NOT include these):
+${existing.length > 0 ? existing.slice(-30).map((phrase) => `  "${phrase}"`).join("\n") : "  none yet"}
+(showing last 30 of ${existing.length} total)
+
+The learner has mastered structural patterns and is now in exploration mode.
+Generate exactly 10 lexical phrases that expand vocabulary and collocations.
+Focus on: domain collocations, near-synonyms, idiomatic expressions,
+register markers, sophisticated connectors.
+
+Consider common reading domains: news, technology, culture, opinion pieces.
+
+Rules:
+- Phrases must be 1-5 words
+- Must be phrases the learner hasn't seen yet
+- Generate the most natural ${language} equivalent
+- phraseType should always be "lexical"
+
+Return ONLY valid JSON array, no markdown:
+[
+  {
+    "phrase": "raises concerns",
+    "targetPhrase": "plantea preocupaciones",
+    "phraseType": "lexical",
+    "pedagogicalNote": "verb-noun collocation common in news"
+  }
+]`;
 }

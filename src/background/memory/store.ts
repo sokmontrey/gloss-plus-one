@@ -1,6 +1,5 @@
 import { callBackboard } from "@/background/api/backboard";
-import { getPhraseState } from "@/background/memory/phraseStore";
-import type { LearnerPhraseState, UserContext } from "@/shared/types";
+import type { PhraseBank, UserContext } from "@/shared/types";
 
 const USER_CONTEXT_STORAGE_KEY = "userContext";
 
@@ -119,15 +118,9 @@ function sanitizeUserContext(input: unknown): Partial<UserContext> {
 
 export async function getUserContext(): Promise<UserContext> {
   try {
-    const [stored, phraseState] = await Promise.all([
-      readStorageValue<unknown>(USER_CONTEXT_STORAGE_KEY),
-      getPhraseState(),
-    ]);
-
     return {
       ...DEFAULT_USER_CONTEXT,
-      ...sanitizeUserContext(stored),
-      phraseState,
+      ...sanitizeUserContext(await readStorageValue<unknown>(USER_CONTEXT_STORAGE_KEY)),
     };
   } catch (error) {
     console.warn("[GlossPlusOne:store] Failed to read user context, using defaults", error);
@@ -150,28 +143,28 @@ export async function saveUserContext(partial: Partial<UserContext>): Promise<vo
 }
 
 export async function syncNarrativeToBackboard(
-  phraseState: LearnerPhraseState,
+  bank: PhraseBank,
   userContext: UserContext,
 ): Promise<void> {
-  const consolidated = phraseState.seenPhrases
+  const consolidated = bank.phrases
     .filter((phrase) => phrase.confidence > 0.8)
     .map((phrase) => `"${phrase.phrase}" → "${phrase.targetPhrase}"`);
 
-  const reinforcing = phraseState.seenPhrases
+  const reinforcing = bank.phrases
     .filter((phrase) => phrase.confidence >= 0.3 && phrase.confidence <= 0.8)
     .map(
       (phrase) =>
-        `"${phrase.phrase}" → "${phrase.targetPhrase}" (${(phrase.confidence * 100).toFixed(0)}% confident, ${phrase.reveals} reveals)`,
+        `"${phrase.phrase}" → "${phrase.targetPhrase}" (${(phrase.confidence * 100).toFixed(0)}% confident, ${phrase.exposures} exposures)`,
     );
 
-  const struggling = phraseState.seenPhrases
+  const struggling = bank.phrases
     .filter((phrase) => phrase.confidence < 0.3 && phrase.exposures > 2)
-    .map((phrase) => `"${phrase.phrase}" (revealed ${phrase.reveals}x)`);
+    .map((phrase) => `"${phrase.phrase}" (hovered ${phrase.hoverCount}x)`);
 
   const narrative = [
     `Learner summary — ${userContext.targetLanguage} from ${userContext.nativeLanguage}`,
     `Level: ${userContext.cefrBand} (${userContext.cefrConfidence}% confidence)`,
-    `Total sessions: ${phraseState.totalSessionCount}`,
+    `Phrase bank: ${bank.phrases.length} phrases across ${bank.batches.length} batches`,
     consolidated.length > 0 ? `Consolidated (knows well): ${consolidated.join(", ")}` : null,
     reinforcing.length > 0 ? `Reinforcing: ${reinforcing.join("; ")}` : null,
     struggling.length > 0 ? `Struggling with: ${struggling.join(", ")}` : null,

@@ -23,6 +23,12 @@ export const OUTPUT_STYLES = `
   text-underline-offset: 3px;
   background-color: rgba(251, 191, 36, calc(0.15 - (var(--gloss-confidence, 0) * 0.14)));
 }
+.${GLOSS_WRAPPER_CLASS}[data-gloss-phrase-type="structural"] {
+  font-weight: 500;
+}
+.${GLOSS_WRAPPER_CLASS}[data-gloss-phrase-type="lexical"] {
+  font-style: italic;
+}
 .${GLOSS_WRAPPER_CLASS}.${GLOSS_REVEALED_CLASS} {
   /* already at final state — animation fires via transition on class add */
 }

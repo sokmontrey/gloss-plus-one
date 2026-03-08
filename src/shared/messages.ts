@@ -1,4 +1,4 @@
-import type { PageContent, ReplacementPlan } from "@/shared/types";
+import type { BankPhrase, ProgressionConfig } from "@/shared/types";
 
 export interface SerializableParagraph {
   index: number;
@@ -8,55 +8,83 @@ export interface SerializableParagraph {
   readingOrder: number;
 }
 
-export interface SerializablePageContent extends Omit<PageContent, "paragraphs"> {
-  paragraphs: SerializableParagraph[];
+export type TriggerPlannerReason =
+  | "initial"
+  | "progression"
+  | "debug_increment"
+  | "debug_decrement";
+
+export interface GetBankMessage {
+  type: "GET_BANK";
+  payload: { language: string };
 }
 
-export interface PageLoadedMessage {
-  type: "PAGE_LOADED";
-  url: string;
-  title: string;
-  at: number;
+export interface BankReadyMessage {
+  type: "BANK_READY";
+  payload: BankPhrase[];
 }
 
-export interface RequestPlanMessage {
-  type: "REQUEST_PLAN";
-  trigger: "initial" | "mutation";
-  payload: SerializablePageContent;
-}
-
-export interface WordSignalMessage {
-  type: "WORD_SIGNAL";
+export interface RecordExposureMessage {
+  type: "RECORD_EXPOSURE";
   payload: {
-    phrase: string;
-    foreignPhrase: string;
-    targetLanguage: string;
-    phraseType: "structural" | "lexical";
-    signal: "exposure" | "reveal" | "pass";
-    dwellMs: number;
+    phraseId: string;
     url: string;
     title: string;
+    language: string;
   };
 }
 
-export interface ResetPhrasesMessage {
-  type: "RESET_PHRASES";
+export interface RecordHoverDecayMessage {
+  type: "RECORD_HOVER_DECAY";
+  payload: {
+    phraseId: string;
+    language: string;
+  };
+}
+
+export interface CheckProgressionMessage {
+  type: "CHECK_PROGRESSION";
+  payload: {
+    language: string;
+  };
+}
+
+export interface TriggerPlannerMessage {
+  type: "TRIGGER_PLANNER";
+  payload: {
+    reason: TriggerPlannerReason;
+    language: string;
+  };
+}
+
+export interface FetchDefinitionMessage {
+  type: "FETCH_DEFINITION";
+  payload: {
+    phraseId: string;
+    foreignPhrase: string;
+    originalPhrase: string;
+    language: string;
+  };
+}
+
+export interface UpdateProgressionConfigMessage {
+  type: "UPDATE_PROGRESSION_CONFIG";
+  payload: Partial<ProgressionConfig>;
 }
 
 export type ContentToBackgroundMessage =
-  | PageLoadedMessage
-  | RequestPlanMessage
-  | WordSignalMessage
-  | ResetPhrasesMessage;
-
-export interface PlanReadyMessage {
-  type: "PLAN_READY";
-  payload: ReplacementPlan[];
-}
+  | GetBankMessage
+  | RecordExposureMessage
+  | RecordHoverDecayMessage
+  | CheckProgressionMessage
+  | TriggerPlannerMessage
+  | FetchDefinitionMessage
+  | UpdateProgressionConfigMessage;
 
 /** Single replacement target: one phrase within a paragraph identified by domPath. */
 export interface ReplacementInstruction {
   id: string;
+  phraseId: string;
   domPath: string;
   /** Paragraph text as extracted (used to match and compute offsets). */
   sourceText: string;
@@ -66,13 +94,10 @@ export interface ReplacementInstruction {
   start: number;
   /** End offset in sourceText (exclusive). */
   end: number;
+  targetLanguage: string;
+  phraseType: "structural" | "lexical";
   confidence?: number;
   isReinforcement?: boolean;
 }
 
-export interface ApplyOutputMessage {
-  type: "APPLY_OUTPUT";
-  payload: ReplacementInstruction[];
-}
-
-export type BackgroundToContentMessage = PlanReadyMessage | ApplyOutputMessage;
+export type BackgroundToContentMessage = BankReadyMessage;

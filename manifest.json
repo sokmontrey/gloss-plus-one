@@ -18,10 +18,12 @@
     "type": "module"
   },
   "options_ui": {
-    "page": "src/dashboard/index.html"
+    "page": "src/dashboard/index.html",
+    "open_in_tab": true
   },
   "permissions": ["storage"],
   "host_permissions": [
+    "https://generativelanguage.googleapis.com/*",
     "https://app.backboard.io/*",
     "https://api.groq.com/*"
   ],

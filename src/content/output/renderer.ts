@@ -153,6 +153,9 @@ export function applyReplacement(instruction: ReplacementInstruction): boolean {
   const confidence = instruction.confidence ?? 0;
   span.setAttribute(GLOSS_MARKER_ATTR, instruction.id);
   span.setAttribute(GLOSS_SOURCE_ATTR, instruction.sourceText.slice(instruction.start, instruction.end));
+  span.setAttribute("data-gloss-phrase-id", instruction.phraseId ?? "");
+  span.setAttribute("data-gloss-language", instruction.targetLanguage ?? "");
+  span.setAttribute("data-gloss-phrase-type", instruction.phraseType);
   span.setAttribute("data-gloss-confidence", String(confidence));
   span.setAttribute("data-gloss-reinforcement", instruction.isReinforcement ? "true" : "false");
   span.className = GLOSS_WRAPPER_CLASS;

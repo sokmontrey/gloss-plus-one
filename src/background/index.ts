@@ -1,15 +1,23 @@
-import { getPhraseState } from "@/background/memory/phraseStore";
+import { getPhraseBank } from "@/background/memory/bankStore";
 import { getUserContext, syncNarrativeToBackboard } from "@/background/memory/store";
 import { routeBackgroundMessage } from "@/background/messaging/router";
 import type { ContentToBackgroundMessage } from "@/shared/messages";
+
 chrome.runtime.onMessage.addListener(
-  (message: ContentToBackgroundMessage, sender: chrome.runtime.MessageSender) => {
-    void routeBackgroundMessage(message, sender);
+  (
+    message: ContentToBackgroundMessage,
+    sender: chrome.runtime.MessageSender,
+    sendResponse: (response?: unknown) => void,
+  ) => {
+    void routeBackgroundMessage(message, sender, sendResponse);
+    return message.type === "GET_BANK" || message.type === "FETCH_DEFINITION";
   },
 );
 
 chrome.runtime.onSuspend.addListener(() => {
-  void Promise.all([getPhraseState(), getUserContext()]).then(([phraseState, userContext]) => {
-    void syncNarrativeToBackboard(phraseState, userContext);
+  void getUserContext().then((userContext) => {
+    void getPhraseBank(userContext.targetLanguage).then((bank) => {
+      void syncNarrativeToBackboard(bank, userContext);
+    });
   });
 });

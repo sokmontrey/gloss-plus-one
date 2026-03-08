@@ -1,144 +1,96 @@
-import { sendPageLoaded, sendRequestPlan, onApplyOutput } from "./bridge";
 import { enrichPageContent } from "./reader/enricher";
 import { createMetrics } from "./reader/metrics";
 import { resolveDomPath } from "./reader/domPath";
 import { withReadOnlyDomGuard } from "./reader/runtimeGuards";
-import type {
-  BackgroundToContentMessage,
-  ReplacementInstruction,
-  SerializableParagraph,
-} from "@/shared/messages";
-import {
-  GLOSS_MARKER_ATTR,
-  GLOSS_WRAPPER_CLASS,
-  applyOutputAndAnimate,
-  injectOutputStyles,
-} from "./output";
+import { initHoverListeners } from "./overlay/tooltipManager";
+import type { BackgroundToContentMessage, ReplacementInstruction, SerializableParagraph } from "@/shared/messages";
+import { applyOutputAndAnimate, injectOutputStyles } from "./output";
+import type { BankPhrase, ProgressionConfig, UserContext } from "@/shared/types";
 import type { PageContent } from "./reader/types";
-import type { ReplacementPlan } from "@/shared/types";
 
 injectOutputStyles(document);
 
 const metrics = createMetrics(import.meta.env.DEV);
-let lastExtractedParagraphs: SerializableParagraph[] = [];
-const processedParagraphPaths = new Set<string>();
 const processedParagraphKeys = new Set<string>();
-const queuedParagraphKeys = new Set<string>();
-let inFlightParagraphKeys = new Set<string>();
-let pendingParagraphs: SerializableParagraph[] = [];
-let planRequestPending = false;
-let latestPageMeta: Pick<PageContent, "url" | "title" | "domain" | "pageType" | "language"> | null = null;
 let scrollTimer: ReturnType<typeof window.setTimeout> | null = null;
 let mutationTimer: ReturnType<typeof window.setTimeout> | null = null;
 let lastScrollY = window.scrollY;
-const replacementSignalsById = new Map<
-  string,
-  {
-    phrase: string;
-    foreignPhrase: string;
-    targetLanguage: string;
-    phraseType: "structural" | "lexical";
-    confidence: number;
-    isReinforcement: boolean;
-  }
->();
+let currentBank: BankPhrase[] = [];
+let currentLanguage = "es";
+let plannerRequested = false;
+let hoverInitialized = false;
+let initializingBadge: HTMLElement | null = null;
+
+const USER_CONTEXT_KEY = "userContext";
+const CONFIG_KEY = "glossProgressionConfig";
+const DEFAULT_USER_CONTEXT: Pick<UserContext, "targetLanguage" | "nativeLanguage"> = {
+  targetLanguage: "es",
+  nativeLanguage: "en",
+};
+const DEFAULT_PROGRESSION_CONFIG: ProgressionConfig = {
+  progressionThreshold: 0.7,
+  confidenceGainPerExposure: 0.03,
+  confidenceDecayPerHover: 0.1,
+  hoverDecayThresholdMs: 2000,
+};
 
 function normalizeText(text: string): string {
   return text.replace(/\s+/g, " ").trim();
 }
 
-function rangesOverlap(
-  left: { start: number; end: number },
-  right: { start: number; end: number },
-): boolean {
+function rangesOverlap(left: { start: number; end: number }, right: { start: number; end: number }): boolean {
   return left.start < right.end && right.start < left.end;
 }
 
-function findUnusedPhraseRange(
-  text: string,
-  phrase: string,
-  caseSensitive: boolean,
-  usedRanges: Array<{ start: number; end: number }>,
-): { start: number; end: number } | null {
-  const haystack = caseSensitive ? text : text.toLowerCase();
-  const needle = caseSensitive ? phrase : phrase.toLowerCase();
-
-  let fromIndex = 0;
-  while (fromIndex < haystack.length) {
-    const start = haystack.indexOf(needle, fromIndex);
-    if (start === -1) {
-      return null;
-    }
-
-    const match = { start, end: start + phrase.length };
-    if (!usedRanges.some((range) => rangesOverlap(range, match))) {
-      return match;
-    }
-
-    fromIndex = start + 1;
-  }
-
-  return null;
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-function buildInstructionsFromPlans(
-  plans: ReplacementPlan[],
+function buildInstructionsFromBank(
   paragraphs: SerializableParagraph[],
+  bank: BankPhrase[],
 ): ReplacementInstruction[] {
-  const paragraphByIndex = new Map(paragraphs.map((paragraph) => [paragraph.index, paragraph]));
+  const instructions: ReplacementInstruction[] = [];
+  const sortedBank = [...bank].sort((left, right) => right.phrase.length - left.phrase.length);
 
-  return plans.flatMap((plan) => {
-    const paragraph = paragraphByIndex.get(plan.paragraphIndex);
-    if (!paragraph) {
-      console.warn(
-        `[GlossPlusOne:content] No paragraph found for index ${plan.paragraphIndex}`,
-      );
-      return [];
-    }
-
-    const sourceText = normalizeText(plan.originalText);
+  for (const paragraph of paragraphs) {
+    const sourceText = normalizeText(paragraph.text);
     const usedRanges: Array<{ start: number; end: number }> = [];
 
-    return plan.replacements.flatMap((replacement) => {
-      const range = findUnusedPhraseRange(
-        sourceText,
-        replacement.targetPhrase,
-        replacement.caseSensitive,
-        usedRanges,
-      );
-
-      if (!range) {
-        console.warn(
-          `[GlossPlusOne:content] targetPhrase not found in originalText: "${replacement.targetPhrase}"`,
-        );
-        return [];
+    for (const bankPhrase of sortedBank) {
+      const normalizedPhrase = normalizeText(bankPhrase.phrase).toLowerCase();
+      if (!normalizedPhrase) {
+        continue;
       }
 
-      usedRanges.push(range);
-      const id = crypto.randomUUID();
-      replacementSignalsById.set(id, {
-        phrase: replacement.targetPhrase,
-        foreignPhrase: replacement.foreignPhrase,
-        targetLanguage: replacement.targetLanguage,
-        phraseType: replacement.replacementType === "grammar_structure" ? "structural" : "lexical",
-        confidence: replacement.confidence ?? 0,
-        isReinforcement: replacement.isReinforcement ?? false,
-      });
+      const regex = new RegExp(`\\b${escapeRegExp(normalizedPhrase)}\\b`, "gi");
+      let match: RegExpExecArray | null = null;
 
-      return [
-        {
-          id,
+      while ((match = regex.exec(sourceText.toLowerCase())) !== null) {
+        const range = { start: match.index, end: match.index + match[0].length };
+        if (usedRanges.some((usedRange) => rangesOverlap(usedRange, range))) {
+          continue;
+        }
+
+        usedRanges.push(range);
+        instructions.push({
+          id: crypto.randomUUID(),
+          phraseId: bankPhrase.id,
           domPath: paragraph.domPath,
           sourceText,
-          replacementText: replacement.foreignPhrase,
+          replacementText: bankPhrase.targetPhrase,
           start: range.start,
           end: range.end,
-          confidence: replacement.confidence,
-          isReinforcement: replacement.isReinforcement,
-        },
-      ];
-    });
-  });
+          targetLanguage: bankPhrase.targetLanguage,
+          phraseType: bankPhrase.phraseType,
+          confidence: bankPhrase.confidence,
+          isReinforcement: bankPhrase.exposures > 0,
+        });
+      }
+    }
+  }
+
+  return instructions;
 }
 
 function getParagraphKey(paragraph: SerializableParagraph): string {
@@ -155,64 +107,75 @@ function serializeParagraph(paragraph: PageContent["paragraphs"][number]): Seria
   };
 }
 
-function rememberParagraphs(paragraphs: SerializableParagraph[]) {
-  const byPath = new Map(lastExtractedParagraphs.map((paragraph) => [paragraph.domPath, paragraph]));
-  for (const paragraph of paragraphs) {
-    byPath.set(paragraph.domPath, paragraph);
-  }
-  lastExtractedParagraphs = [...byPath.values()].sort((left, right) => left.index - right.index);
+async function getPageUserContext(): Promise<Pick<UserContext, "targetLanguage" | "nativeLanguage">> {
+  const result = await chrome.storage.local.get(USER_CONTEXT_KEY);
+  const stored = result[USER_CONTEXT_KEY] as Partial<UserContext> | undefined;
+
+  return {
+    targetLanguage: stored?.targetLanguage ?? DEFAULT_USER_CONTEXT.targetLanguage,
+    nativeLanguage: stored?.nativeLanguage ?? DEFAULT_USER_CONTEXT.nativeLanguage,
+  };
 }
 
-function queueParagraphs(paragraphs: SerializableParagraph[]) {
-  const byPath = new Map(pendingParagraphs.map((paragraph) => [paragraph.domPath, paragraph]));
-  for (const paragraph of paragraphs) {
-    const paragraphKey = getParagraphKey(paragraph);
-    if (processedParagraphKeys.has(paragraphKey) || inFlightParagraphKeys.has(paragraphKey)) {
-      continue;
-    }
-
-    queuedParagraphKeys.add(paragraphKey);
-    byPath.set(paragraph.domPath, paragraph);
-  }
-  pendingParagraphs = [...byPath.values()].sort((left, right) => left.index - right.index);
+async function getProgressionConfig(): Promise<ProgressionConfig> {
+  const result = await chrome.storage.local.get(CONFIG_KEY);
+  return {
+    ...DEFAULT_PROGRESSION_CONFIG,
+    ...(result[CONFIG_KEY] as Partial<ProgressionConfig> | undefined),
+  };
 }
 
-function getPageMeta(
-  pageContent?: PageContent,
-): Pick<PageContent, "url" | "title" | "domain" | "pageType" | "language"> {
-  if (pageContent) {
-    return {
-      url: pageContent.url,
-      title: pageContent.title,
-      domain: pageContent.domain,
-      pageType: pageContent.pageType,
-      language: pageContent.language,
-    };
+async function getBankPhrases(language: string): Promise<BankPhrase[]> {
+  return (await chrome.runtime.sendMessage({
+    type: "GET_BANK",
+    payload: { language },
+  })) as BankPhrase[];
+}
+
+function ensureInitializingBadge(): HTMLElement {
+  if (initializingBadge?.isConnected) {
+    return initializingBadge;
   }
 
-  if (latestPageMeta) {
-    return latestPageMeta;
-  }
+  initializingBadge = document.createElement("div");
+  initializingBadge.textContent = "GlossPlusOne initializing...";
+  initializingBadge.style.cssText = [
+    "position: fixed",
+    "right: 12px",
+    "bottom: 12px",
+    "z-index: 2147483647",
+    "padding: 8px 12px",
+    "border-radius: 999px",
+    "background: rgba(15, 23, 42, 0.92)",
+    "color: white",
+    "font: 12px/1.2 system-ui, sans-serif",
+    "box-shadow: 0 6px 20px rgba(0, 0, 0, 0.18)",
+    "pointer-events: none",
+  ].join(";");
+  document.body.appendChild(initializingBadge);
+  return initializingBadge;
+}
 
-  const content = withReadOnlyDomGuard(() => enrichPageContent(document));
-  latestPageMeta = getPageMeta(content);
-  return latestPageMeta;
+function showInitializingState(): void {
+  ensureInitializingBadge().style.display = "block";
+}
+
+function hideInitializingState(): void {
+  if (initializingBadge) {
+    initializingBadge.style.display = "none";
+  }
 }
 
 function extractVisibleParagraphs(): SerializableParagraph[] {
   const run = metrics.start("delta");
   const content = withReadOnlyDomGuard(() => enrichPageContent(document));
   metrics.end(run);
-  latestPageMeta = getPageMeta(content);
 
   const visibleParagraphs = content.paragraphs
     .map(serializeParagraph)
     .filter((paragraph) => {
       const paragraphKey = getParagraphKey(paragraph);
-      if (processedParagraphPaths.has(paragraph.domPath)) return false;
       if (processedParagraphKeys.has(paragraphKey)) return false;
-      if (queuedParagraphKeys.has(paragraphKey)) return false;
-      if (inFlightParagraphKeys.has(paragraphKey)) return false;
 
       const el = resolveDomPath(paragraph.domPath);
       if (!el) return false;
@@ -227,95 +190,75 @@ function extractVisibleParagraphs(): SerializableParagraph[] {
   return visibleParagraphs;
 }
 
-function requestPlanForParagraphs(paragraphs: SerializableParagraph[], trigger: "initial" | "scroll") {
-  if (paragraphs.length === 0) return;
-
-  if (planRequestPending) {
-    queueParagraphs(paragraphs);
-    return;
+function markParagraphsProcessed(paragraphs: SerializableParagraph[]): void {
+  for (const paragraph of paragraphs) {
+    processedParagraphKeys.add(getParagraphKey(paragraph));
   }
-
-  const nextParagraphs = paragraphs.filter((paragraph) => {
-    const paragraphKey = getParagraphKey(paragraph);
-    if (processedParagraphKeys.has(paragraphKey)) return false;
-    if (inFlightParagraphKeys.has(paragraphKey)) return false;
-    queuedParagraphKeys.delete(paragraphKey);
-    return true;
-  });
-
-  if (nextParagraphs.length === 0) {
-    return;
-  }
-
-  planRequestPending = true;
-  inFlightParagraphKeys = new Set(nextParagraphs.map((paragraph) => getParagraphKey(paragraph)));
-  rememberParagraphs(nextParagraphs);
-
-  const pageMeta = getPageMeta();
-  const content: PageContent = {
-    ...pageMeta,
-    paragraphs: nextParagraphs.map((paragraph) => ({
-      ...paragraph,
-      nodeRef: null,
-    })),
-    totalWordCount: nextParagraphs.reduce((sum, paragraph) => sum + paragraph.wordCount, 0),
-    extractedAt: Date.now(),
-  };
-
-  sendRequestPlan(trigger === "initial" ? "initial" : "mutation", content);
-  console.log("[GlossPlusOne:content] REQUEST_PLAN sent");
 }
 
-onApplyOutput((payload) => {
-  applyOutputAndAnimate(payload);
-});
-
-document.addEventListener("click", (event) => {
-  const target = event.target;
-  if (!(target instanceof Element)) {
+async function applyBankToVisibleParagraphs(): Promise<void> {
+  if (currentBank.length === 0) {
     return;
   }
 
-  const wrapper = target.closest(`.${GLOSS_WRAPPER_CLASS}`);
-  if (!(wrapper instanceof HTMLElement)) {
+  const paragraphs = extractVisibleParagraphs();
+  if (paragraphs.length === 0) {
     return;
   }
 
-  const replacementId = wrapper.getAttribute(GLOSS_MARKER_ATTR);
-  if (!replacementId) {
-    return;
-  }
+  const instructions = buildInstructionsFromBank(paragraphs, currentBank);
+  console.log(
+    `[GlossPlusOne:content] Bank ${currentBank.length} phrases produced ${instructions.length} matches`,
+  );
 
-  const signal = replacementSignalsById.get(replacementId);
-  if (!signal) {
-    return;
-  }
+  markParagraphsProcessed(paragraphs);
 
-  const nextConfidence = Math.max(signal.confidence - 0.12, 0);
-  signal.confidence = nextConfidence;
-  wrapper.style.setProperty("--gloss-confidence", String(nextConfidence));
-  wrapper.setAttribute("data-gloss-confidence", String(nextConfidence));
+  if (instructions.length > 0) {
+    applyOutputAndAnimate(instructions);
+    for (const instruction of instructions) {
+      void chrome.runtime.sendMessage({
+        type: "RECORD_EXPOSURE",
+        payload: {
+          phraseId: instruction.phraseId,
+          url: window.location.href,
+          title: document.title,
+          language: currentLanguage,
+        },
+      });
+    }
+  }
 
   void chrome.runtime.sendMessage({
-    type: "WORD_SIGNAL",
-    payload: {
-      phrase: signal.phrase,
-      foreignPhrase: signal.foreignPhrase,
-      targetLanguage: signal.targetLanguage,
-      phraseType: signal.phraseType,
-      signal: "reveal",
-      dwellMs: 0,
-      url: window.location.href,
-      title: document.title,
-    },
+    type: "CHECK_PROGRESSION",
+    payload: { language: currentLanguage },
   });
-});
+}
 
-sendPageLoaded();
-window.setTimeout(() => {
-  const initialParagraphs = extractVisibleParagraphs();
-  requestPlanForParagraphs(initialParagraphs, "initial");
-}, 300);
+async function initPage(): Promise<void> {
+  const [userContext, config] = await Promise.all([getPageUserContext(), getProgressionConfig()]);
+  currentLanguage = userContext.targetLanguage;
+
+  if (!hoverInitialized) {
+    initHoverListeners(config, userContext.targetLanguage, userContext.nativeLanguage, "structural");
+    hoverInitialized = true;
+  }
+
+  currentBank = await getBankPhrases(currentLanguage);
+  if (currentBank.length === 0) {
+    showInitializingState();
+    if (!plannerRequested) {
+      plannerRequested = true;
+      void chrome.runtime.sendMessage({
+        type: "TRIGGER_PLANNER",
+        payload: { reason: "initial", language: currentLanguage },
+      });
+    }
+    return;
+  }
+
+  hideInitializingState();
+  await applyBankToVisibleParagraphs();
+}
 
 const observer = new MutationObserver((records) => {
   const hasAddedElements = records.some((record) =>
@@ -331,8 +274,7 @@ const observer = new MutationObserver((records) => {
   }
 
   mutationTimer = window.setTimeout(() => {
-    const paragraphs = extractVisibleParagraphs();
-    requestPlanForParagraphs(paragraphs, "scroll");
+    void applyBankToVisibleParagraphs();
   }, 500);
 });
 
@@ -356,73 +298,23 @@ window.addEventListener(
     }
 
     scrollTimer = window.setTimeout(() => {
-      const newParagraphs = extractVisibleParagraphs();
-      if (newParagraphs.length > 0) {
-        requestPlanForParagraphs(newParagraphs, "scroll");
-      }
+      void applyBankToVisibleParagraphs();
     }, 400);
   },
   { passive: true },
 );
 
 chrome.runtime.onMessage.addListener((message: BackgroundToContentMessage) => {
-  if (message.type !== "PLAN_READY") {
+  if (message.type !== "BANK_READY") {
     return;
   }
 
-  console.log(
-    `[GlossPlusOne:content] PLAN_READY received — ${message.payload.length} plans`,
-  );
-
-  const freshPlans = message.payload.filter((plan) => {
-    const paragraph = lastExtractedParagraphs.find((candidate) => candidate.index === plan.paragraphIndex);
-    if (!paragraph) return false;
-    if (processedParagraphPaths.has(paragraph.domPath)) return false;
-    processedParagraphPaths.add(paragraph.domPath);
-    return true;
-  });
-
-  const instructions = buildInstructionsFromPlans(freshPlans, lastExtractedParagraphs);
-  console.log(
-    `[GlossPlusOne:content] Built ${instructions.length} instructions from plans`,
-  );
-
-  for (const paragraphKey of inFlightParagraphKeys) {
-    processedParagraphKeys.add(paragraphKey);
-  }
-  inFlightParagraphKeys = new Set();
-
-  planRequestPending = false;
-  if (instructions.length > 0) {
-    console.log("[GlossPlusOne:content] Applying instructions to DOM");
-    observer.disconnect();
-    applyOutputAndAnimate(instructions);
-    for (const plan of freshPlans) {
-      for (const replacement of plan.replacements) {
-        void chrome.runtime.sendMessage({
-          type: "WORD_SIGNAL",
-          payload: {
-            phrase: replacement.targetPhrase,
-            foreignPhrase: replacement.foreignPhrase,
-            targetLanguage: replacement.targetLanguage,
-            phraseType: replacement.replacementType === "grammar_structure" ? "structural" : "lexical",
-            signal: "exposure",
-            dwellMs: 0,
-            url: window.location.href,
-            title: document.title,
-          },
-        });
-      }
-    }
-    requestAnimationFrame(() => {
-      if (document.body) {
-        observer.observe(document.body, { childList: true, subtree: true });
-      }
-    });
-  }
-
-  if (pendingParagraphs.length > 0) {
-    const queuedParagraphs = pendingParagraphs.splice(0);
-    requestPlanForParagraphs(queuedParagraphs, "scroll");
-  }
+  plannerRequested = false;
+  currentBank = message.payload;
+  hideInitializingState();
+  void applyBankToVisibleParagraphs();
 });
+
+window.setTimeout(() => {
+  void initPage();
+}, 300);

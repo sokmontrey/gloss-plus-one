@@ -6,7 +6,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
 
-export async function callGroq(prompt: string): Promise<string> {
+export async function callGroq(prompt: string, responseMimeType = "application/json"): Promise<string> {
   const apiKey = import.meta.env.VITE_GROQ_API_KEY?.trim();
   if (!apiKey) throw new Error("GROQ_KEY_MISSING");
 
@@ -27,7 +27,9 @@ export async function callGroq(prompt: string): Promise<string> {
         messages: [{ role: "user", content: prompt }],
         temperature: 0.3,
         max_tokens: 2048,
-        response_format: { type: "json_object" },
+        ...(responseMimeType === "application/json"
+          ? { response_format: { type: "json_object" } }
+          : {}),
       }),
       signal: controller.signal,
     });

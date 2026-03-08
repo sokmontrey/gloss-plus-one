@@ -23,6 +23,49 @@ export interface UserContext {
   debugLearnerLevel: number;
 }
 
+export interface BankPhrase {
+  id: string;
+  phrase: string;
+  targetPhrase: string;
+  targetLanguage: string;
+  nativeLanguage: string;
+  phraseType: "structural" | "lexical";
+  tier: number;
+  addedAt: number;
+  addedByBatch: string;
+  confidence: number;
+  exposures: number;
+  hoverCount: number;
+  lastSeenAt: number;
+  firstSeenUrl: string;
+  firstSeenTitle: string;
+}
+
+export interface PhraseBatch {
+  id: string;
+  addedAt: number;
+  tier: number;
+  triggerReason: "initial" | "progression" | "debug_increment" | "debug_decrement";
+  phraseCount: number;
+  plannerContext: string;
+}
+
+export interface PhraseBank {
+  phrases: BankPhrase[];
+  language: string;
+  currentTier: number;
+  lastPlannerRunAt: number;
+  lastBatchId: string;
+  batches: PhraseBatch[];
+}
+
+export interface ProgressionConfig {
+  progressionThreshold: number;
+  confidenceGainPerExposure: number;
+  confidenceDecayPerHover: number;
+  hoverDecayThresholdMs: number;
+}
+
 export interface PlannedReplacement {
   targetPhrase: string;
   foreignPhrase: string;

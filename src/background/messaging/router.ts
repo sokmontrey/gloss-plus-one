@@ -1,78 +1,81 @@
-import { buildReplacementPlans } from "@/background/agent/planner";
+import { callPlannerLLM, runPlanner } from "@/background/agent/planner";
 import {
-  getPhraseState,
-  recordPhraseExposure,
-  recordPhrasePassed,
-  recordPhraseReveal,
-  resetPhraseState,
-  touchPhraseSession,
-} from "@/background/memory/phraseStore";
-import { getUserContext, syncNarrativeToBackboard } from "@/background/memory/store";
+  getPhraseBank,
+  recordExposure,
+  recordHoverDecay,
+  saveProgressionConfig,
+  shouldTriggerProgression,
+} from "@/background/memory/bankStore";
 import type { BackgroundToContentMessage, ContentToBackgroundMessage } from "@/shared/messages";
-
-let interactionCountSinceSync = 0;
 
 export async function routeBackgroundMessage(
   message: ContentToBackgroundMessage,
   sender: chrome.runtime.MessageSender,
-): Promise<void> {
+  sendResponse: (response?: unknown) => void,
+): Promise<boolean | void> {
   switch (message.type) {
-    case "PAGE_LOADED": {
-      await touchPhraseSession(message.at);
-      console.debug("[GlossPlusOne/background] Page loaded", {
-        url: message.url,
-        title: message.title,
-      });
+    case "GET_BANK": {
+      const bank = await getPhraseBank(message.payload.language);
+      sendResponse(bank.phrases);
+      return true;
+    }
+
+    case "RECORD_EXPOSURE": {
+      const { phraseId, url, title, language } = message.payload;
+      await recordExposure(phraseId, url, title, language);
       break;
     }
 
-    case "WORD_SIGNAL": {
-      const { phrase, foreignPhrase, targetLanguage, phraseType, signal, url, title } = message.payload;
+    case "RECORD_HOVER_DECAY": {
+      const { phraseId, language } = message.payload;
+      await recordHoverDecay(phraseId, language);
+      break;
+    }
 
-      if (signal === "exposure") {
-        await recordPhraseExposure(phrase, foreignPhrase, targetLanguage, phraseType, url, title);
-      } else if (signal === "reveal") {
-        await recordPhraseReveal(phrase, targetLanguage);
-      } else if (signal === "pass") {
-        await recordPhrasePassed(phrase, targetLanguage);
+    case "CHECK_PROGRESSION": {
+      const { language } = message.payload;
+      const shouldProgress = await shouldTriggerProgression(language);
+      if (shouldProgress) {
+        console.log("[GlossPlusOne:router] Progression triggered");
+        void runPlanner("progression", language);
       }
-
-      interactionCountSinceSync += 1;
-      if (interactionCountSinceSync >= 5) {
-        interactionCountSinceSync = 0;
-        const [phraseState, userContext] = await Promise.all([getPhraseState(), getUserContext()]);
-        void syncNarrativeToBackboard(phraseState, userContext);
-      }
       break;
     }
 
-    case "RESET_PHRASES": {
-      await resetPhraseState();
-      console.log("[GlossPlusOne:router] Learned phrases reset");
-      break;
-    }
+    case "TRIGGER_PLANNER": {
+      const { reason, language } = message.payload;
+      await runPlanner(reason, language);
 
-    case "REQUEST_PLAN": {
-      console.log(
-        `[GlossPlusOne:router] REQUEST_PLAN received — ${message.payload.paragraphs.length} paragraphs`,
-      );
-      const plans = await buildReplacementPlans(message.payload);
       const tabId = sender.tab?.id;
+      if (typeof tabId === "number") {
+        const bank = await getPhraseBank(language);
+        const response: BackgroundToContentMessage = {
+          type: "BANK_READY",
+          payload: bank.phrases,
+        };
 
-      if (typeof tabId !== "number") {
-        console.warn("[GlossPlusOne/background] Cannot deliver PLAN_READY without tab id");
-        break;
+        chrome.tabs.sendMessage(tabId, response).catch((error) => {
+          console.warn("[GlossPlusOne:router] Failed to send BANK_READY", error);
+        });
       }
+      break;
+    }
 
-      const response: BackgroundToContentMessage = {
-        type: "PLAN_READY",
-        payload: plans,
-      };
+    case "FETCH_DEFINITION": {
+      const { foreignPhrase, originalPhrase, language } = message.payload;
+      const prompt = `Define "${foreignPhrase}" in ${language} in 1 simple sentence using only ${language}. No English. No quotes. Max 15 words.`;
 
-      console.log(`[GlossPlusOne:router] PLAN_READY sending — ${plans.length} plans`);
-      chrome.tabs.sendMessage(tabId, response).catch((error) => {
-        console.warn("[GlossPlusOne/background] Failed to send PLAN_READY", error);
-      });
+      try {
+        const definition = await callPlannerLLM(prompt, "text/plain");
+        sendResponse({ definition: definition.trim().replace(/^"+|"+$/g, "") });
+      } catch {
+        sendResponse({ definition: originalPhrase });
+      }
+      return true;
+    }
+
+    case "UPDATE_PROGRESSION_CONFIG": {
+      await saveProgressionConfig(message.payload);
       break;
     }
 
