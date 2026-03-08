@@ -149,7 +149,7 @@ Built with ❤️ at Hack Canada 2026
 
 ### 🙏 Acknowledgments
 - The Hack Canada 2026 organizers and sponsors. You guys are cooking.
-- Our HuskyHack Gang from GBP. Thanks for making this adventure less lonely.
+- Our [HuskyHack](https://huskyhack.ca) Gang from GBP. Thanks for making this adventure less lonely.
 
 ## 📧 Contact
 For support or questions, feel free to open an issue or reach out to the project maintainers!
