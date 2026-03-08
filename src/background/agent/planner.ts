@@ -1,10 +1,10 @@
 import { callGemini } from "../api/gemini";
 import { callGroq } from "../api/groq";
 import { getPhraseBank, removeLastBatch, savePhraseBank } from "../memory/bankStore";
-import { getInterestProfile } from "../memory/pageSignalStore";
+import { getInterestProfile, getPageSignals } from "../memory/pageSignalStore";
 import { getUserContext } from "../memory/store";
 import type { TriggerPlannerReason } from "@/shared/messages";
-import type { BankPhrase, PhraseBank, UserContext, UserInterestProfile } from "@/shared/types";
+import type { BankPhrase, PageSignal, PhraseBank, UserContext, UserInterestProfile } from "@/shared/types";
 
 interface RawPlannerPhrase {
   phrase: string;
@@ -19,6 +19,53 @@ function stripMarkdownFences(value: string): string {
 
 function normalizePhrase(value: string): string {
   return value.replace(/\s+/g, " ").trim();
+}
+
+function extractJsonPayload(value: string): string {
+  const firstArrayIndex = value.indexOf("[");
+  const lastArrayIndex = value.lastIndexOf("]");
+  if (firstArrayIndex !== -1 && lastArrayIndex > firstArrayIndex) {
+    return value.slice(firstArrayIndex, lastArrayIndex + 1);
+  }
+
+  const firstObjectIndex = value.indexOf("{");
+  const lastObjectIndex = value.lastIndexOf("}");
+  if (firstObjectIndex !== -1 && lastObjectIndex > firstObjectIndex) {
+    return value.slice(firstObjectIndex, lastObjectIndex + 1);
+  }
+
+  return value;
+}
+
+function replaceSingleQuotedStrings(value: string): string {
+  return value.replace(/'([^'\\]*(?:\\.[^'\\]*)*)'/g, (_, inner: string) => JSON.stringify(inner));
+}
+
+function repairLikelyJson(value: string): string {
+  return replaceSingleQuotedStrings(value)
+    .replace(/[“”]/g, "\"")
+    .replace(/[‘’]/g, "'")
+    .replace(/([{,]\s*)([A-Za-z_][A-Za-z0-9_]*)(\s*:)/g, '$1"$2"$3')
+    .replace(/,\s*([}\]])/g, "$1");
+}
+
+function parseJsonWithRepairs(raw: string): unknown {
+  const extracted = extractJsonPayload(stripMarkdownFences(raw));
+  const attempts = [
+    extracted,
+    repairLikelyJson(extracted),
+  ];
+
+  let lastError: unknown = null;
+  for (const candidate of attempts) {
+    try {
+      return JSON.parse(candidate) as unknown;
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  throw lastError instanceof Error ? lastError : new Error("PLANNER_JSON_PARSE_FAILED");
 }
 
 function isRawPlannerPhrase(value: unknown): value is RawPlannerPhrase {
@@ -49,10 +96,11 @@ export async function runPlanner(triggerReason: TriggerPlannerReason, language: 
     return;
   }
 
-  const [bank, userContext, interestProfile] = await Promise.all([
+  const [bank, userContext, interestProfile, pageSignals] = await Promise.all([
     getPhraseBank(language),
     getUserContext(),
     getInterestProfile(),
+    getPageSignals(),
   ]);
   const batchId = crypto.randomUUID();
   const nextTier = triggerReason === "initial" ? 1 : bank.currentTier + 1;
@@ -60,6 +108,7 @@ export async function runPlanner(triggerReason: TriggerPlannerReason, language: 
     bank,
     userContext,
     interestProfile,
+    pageSignals,
     nextTier,
     batchId,
     triggerReason,
@@ -94,6 +143,7 @@ async function generatePhraseBatch(
   bank: PhraseBank,
   userContext: UserContext,
   interestProfile: UserInterestProfile,
+  pageSignals: PageSignal[],
   tier: number,
   batchId: string,
   triggerReason: TriggerPlannerReason,
@@ -101,10 +151,11 @@ async function generatePhraseBatch(
 ): Promise<BankPhrase[]> {
   const existingPhrases = bank.phrases.map((phrase) => normalizePhrase(phrase.phrase).toLowerCase());
   const existingSet = new Set(existingPhrases);
+  const recentReadingSamples = buildRecentReadingSamples(pageSignals);
   const prompt =
     tier >= 4
-      ? buildExplorationPrompt(userContext, interestProfile, existingPhrases, language, tier)
-      : buildStructuralPrompt(userContext, interestProfile, existingPhrases, language, tier);
+      ? buildExplorationPrompt(userContext, interestProfile, existingPhrases, recentReadingSamples, language, tier)
+      : buildStructuralPrompt(userContext, interestProfile, existingPhrases, recentReadingSamples, language, tier);
 
   console.log(
     `[GlossPlusOne:planner] Generating tier ${tier} batch for ${language} (${triggerReason})`,
@@ -112,6 +163,7 @@ async function generatePhraseBatch(
       topTopics: interestProfile.topTopics.slice(0, 3),
       topDomains: interestProfile.topDomains.slice(0, 3),
       recentTopics: interestProfile.recentTopics.slice(0, 3),
+      recentSamples: recentReadingSamples.length,
     },
   );
 
@@ -147,8 +199,7 @@ async function generatePhraseBatch(
 }
 
 function parsePlannerResponse(raw: string): RawPlannerPhrase[] {
-  const clean = stripMarkdownFences(raw);
-  const parsed = JSON.parse(clean) as unknown;
+  const parsed = parseJsonWithRepairs(raw);
   const payload = Array.isArray(parsed)
     ? parsed
     : typeof parsed === "object" && parsed !== null && Array.isArray((parsed as Record<string, unknown>).phrases)
@@ -158,10 +209,25 @@ function parsePlannerResponse(raw: string): RawPlannerPhrase[] {
   return payload.filter(isRawPlannerPhrase);
 }
 
+function buildRecentReadingSamples(signals: PageSignal[]): string[] {
+  return [...signals]
+    .reverse()
+    .filter((signal) => signal.contentSnippet.trim().length > 0)
+    .slice(0, 4)
+    .map((signal) => {
+      const topicLabel = signal.topic ? `Topic: ${signal.topic}` : "Topic: unknown";
+      return `Title: ${signal.title}
+Domain: ${signal.domain}
+${topicLabel}
+Excerpt: ${signal.contentSnippet}`;
+    });
+}
+
 function buildStructuralPrompt(
   userContext: UserContext,
   interestProfile: UserInterestProfile,
   existing: string[],
+  recentReadingSamples: string[],
   language: string,
   tier: number,
 ): string {
@@ -180,6 +246,16 @@ content. For example, if they read tech articles, prefer "as a result"
 over "in the garden" as a context for grammar demonstration.
 `
       : "";
+  const readingSamplesContext =
+    recentReadingSamples.length > 0
+      ? `
+RECENT PAGE EXCERPTS:
+${recentReadingSamples.map((sample, index) => `Sample ${index + 1}:\n${sample}`).join("\n\n")}
+
+Use these excerpts to choose structural phrases that appear naturally in what the learner is actually reading.
+Prefer grammar chunks and connectors that fit the syntax, tone, and discourse patterns in these passages.
+`
+      : "";
 
   return `
 You are building a language acquisition phrase bank for a learner.
@@ -187,6 +263,7 @@ Native language: ${userContext.nativeLanguage}
 Target language: ${language}
 Current tier: ${tierLabel}
 ${readingContext}
+${readingSamplesContext}
 
 ALREADY IN BANK (do NOT include these):
 ${existing.length > 0 ? existing.map((phrase) => `  "${phrase}"`).join("\n") : "  none yet"}
@@ -218,16 +295,28 @@ function buildExplorationPrompt(
   userContext: UserContext,
   interestProfile: UserInterestProfile,
   existing: string[],
+  recentReadingSamples: string[],
   language: string,
   tier: number,
 ): string {
   const tierLabel = ["", "A1", "A2", "B1", "B2", "C1", "C2"][tier] ?? "B2";
+  const readingSamplesContext =
+    recentReadingSamples.length > 0
+      ? `
+RECENT PAGE EXCERPTS:
+${recentReadingSamples.map((sample, index) => `Sample ${index + 1}:\n${sample}`).join("\n\n")}
+
+Use these excerpts to select lexical phrases that are likely to appear again in this learner's real reading.
+Favor collocations, domain vocabulary, and connectors directly supported by the sample passages.
+`
+      : "";
 
   return `
 You are building a lexical exploration phrase bank for an advanced learner.
 Native language: ${userContext.nativeLanguage}
 Target language: ${language}
 Current tier: ${tierLabel}
+${readingSamplesContext}
 
 ALREADY IN BANK (do NOT include these):
 ${existing.length > 0 ? existing.slice(-30).map((phrase) => `  "${phrase}"`).join("\n") : "  none yet"}
@@ -270,6 +359,7 @@ export async function extractPageTopic(
   title: string,
   domain: string,
   pageType: string,
+  contentSnippet: string,
 ): Promise<string | null> {
   if (pageType === "unknown" || !title || title.length < 5) {
     return null;
@@ -277,6 +367,9 @@ export async function extractPageTopic(
 
   const prompt = `Article title: "${title}"
 Domain: ${domain}
+Excerpt:
+${contentSnippet || "No excerpt available"}
+
 Reply with ONLY a topic label, 3 words maximum, no punctuation.
 Examples: "machine learning inference", "Canadian federal election",
 "personal finance tips", "web development tools"

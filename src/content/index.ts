@@ -30,7 +30,7 @@ let plannerRequested = false;
 let hoverInitialized = false;
 let selectionInitialized = false;
 let initializingBadge: HTMLElement | null = null;
-let latestPageContext: Pick<PageContent, "url" | "title" | "domain" | "pageType"> | null = null;
+let latestPageContext: Pick<PageContent, "url" | "title" | "domain" | "pageType"> & { contentSnippet: string } | null = null;
 let currentTier = 1;
 let currentBatchId = "";
 let pageDisabled = false;
@@ -319,11 +319,18 @@ function extractVisibleParagraphs(): SerializableParagraph[] {
   const run = metrics.start("delta");
   const content = withReadOnlyDomGuard(() => enrichPageContent(document));
   metrics.end(run);
+  const contentSnippet = content.paragraphs
+    .map((paragraph) => normalizeText(paragraph.text))
+    .filter((paragraph) => paragraph.length > 0)
+    .slice(0, 3)
+    .join("\n\n")
+    .slice(0, 900);
   latestPageContext = {
     url: content.url,
     title: content.title,
     domain: content.domain,
     pageType: content.pageType,
+    contentSnippet,
   };
 
   const visibleParagraphs = content.paragraphs
@@ -381,6 +388,7 @@ async function applyBankToVisibleParagraphs(forceRefresh = false): Promise<void>
       title: document.title,
       domain: window.location.hostname,
       pageType: "unknown" as PageContent["pageType"],
+      contentSnippet: "",
     };
 
     if (shouldProcessCurrentSiteLevel()) {
@@ -391,6 +399,7 @@ async function applyBankToVisibleParagraphs(forceRefresh = false): Promise<void>
           title: pageContext.title,
           domain: pageContext.domain,
           pageType: pageContext.pageType,
+          contentSnippet: pageContext.contentSnippet,
           replacementCount: instructions.length,
         },
       });

@@ -73,6 +73,7 @@ export interface PageSignal {
   domain: string;
   pageType: string;
   topic: string | null;
+  contentSnippet: string;
   replacementCount: number;
   visitedAt: number;
 }

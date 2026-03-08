@@ -126,6 +126,7 @@ export async function routeBackgroundMessage(
         pageType: payload.pageType,
         replacementCount: payload.replacementCount,
         topic: null,
+        contentSnippet: payload.contentSnippet,
         visitedAt: Date.now(),
       });
 
@@ -135,7 +136,7 @@ export async function routeBackgroundMessage(
         void recomputeInterestProfile();
       }
 
-      void extractPageTopic(payload.title, payload.domain, payload.pageType).then(async (topic) => {
+      void extractPageTopic(payload.title, payload.domain, payload.pageType, payload.contentSnippet).then(async (topic) => {
         if (!topic) {
           return;
         }

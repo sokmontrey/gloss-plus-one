@@ -103,6 +103,7 @@ export interface ReportPageSignalMessage {
     title: string;
     domain: string;
     pageType: string;
+    contentSnippet: string;
     replacementCount: number;
   };
 }
