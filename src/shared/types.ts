@@ -21,6 +21,8 @@ export interface UserContext {
   progressionThreshold: number;
   /** 0–1: debug override. 0 = nothing, 1 = everything (basics known, exploration mode). Persisted. */
   debugLearnerLevel: number;
+  assessmentScore?: number;
+  badges?: string[];
 }
 
 export interface BankPhrase {

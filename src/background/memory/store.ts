@@ -20,6 +20,8 @@ const DEFAULT_USER_CONTEXT: UserContext = {
   },
   progressionThreshold: 0.6,
   debugLearnerLevel: 0,
+  assessmentScore: 0,
+  badges: [],
 };
 
 const VALID_CEFR_BANDS = new Set<UserContext["cefrBand"]>(["A1", "A2", "B1", "B2", "C1", "C2"]);
@@ -111,6 +113,14 @@ function sanitizeUserContext(input: unknown): Partial<UserContext> {
 
   if (typeof candidate.debugLearnerLevel === "number") {
     sanitized.debugLearnerLevel = Math.max(0, Math.min(1, candidate.debugLearnerLevel));
+  }
+
+  if (typeof candidate.assessmentScore === "number") {
+    sanitized.assessmentScore = candidate.assessmentScore;
+  }
+
+  if (isStringArray(candidate.badges)) {
+    sanitized.badges = candidate.badges;
   }
 
   return sanitized;

@@ -23,7 +23,7 @@ import {
   recomputeInterestProfile,
   recordPageSignal,
 } from "@/background/memory/pageSignalStore";
-import { getUserContext } from "@/background/memory/store";
+import { getUserContext, saveUserContext } from "@/background/memory/store";
 import { STRUCTURAL_PHRASES } from "@/shared/structuralPhrases";
 import type { BackgroundToContentMessage, ContentToBackgroundMessage } from "@/shared/messages";
 import type { BankPhrase } from "@/shared/types";
@@ -334,6 +334,42 @@ export async function routeBackgroundMessage(
         sendResponse({ success: false });
       }
 
+      return true;
+    }
+
+    case "ASSESS_TRANSLATION": {
+      const { phrase, userTranslation, language } = message.payload;
+      
+      try {
+        const userContext = await getUserContext();
+        const prompt = `You are an encouraging language teacher evaluating a user's translation attempt.
+Native language context: ${userContext.nativeLanguage}
+Target language: ${language}
+Original Phrase to Translate: "${phrase}"
+User's Translation Attempt: "${userTranslation}"
+
+Evaluate the user's translation. Return a JSON object with:
+- "score": A number from 0 to 5, where 0 is completely wrong and 5 is perfect.
+- "most_correct_translation": The most natural and correct translation in the target language.
+- "feedback": Extremely concise feedback (max 1 short sentence). Be encouraging but brief.
+
+Return ONLY pure JSON. No markdown blocks, no quotes, no explanation.`;
+
+        const rawResponse = await callStructuredTranslationLLM(prompt, "application/json");
+        const jsonText = rawResponse.replace(/```[\s\S]*?```/g, "").replace(/^```json|```$/g, "").trim();
+        const result = JSON.parse(jsonText);
+        
+        if (typeof result.score === "number") {
+          const newScore = (userContext.assessmentScore || 0) + result.score;
+          await saveUserContext({ assessmentScore: newScore });
+          console.log(`[GlossPlusOne:router] Assessed translation score ${result.score}/5. New total: ${newScore}`);
+        }
+
+        sendResponse({ success: true, result });
+      } catch (error) {
+        console.error("[GlossPlusOne:router] Translation assessment failed:", error);
+        sendResponse({ success: false, error: "Failed to assess translation." });
+      }
       return true;
     }
 

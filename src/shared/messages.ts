@@ -142,6 +142,15 @@ export interface AddPhraseToBankMessage {
   };
 }
 
+export interface AssessTranslationMessage {
+  type: "ASSESS_TRANSLATION";
+  payload: {
+    phrase: string;
+    userTranslation: string;
+    language: string;
+  };
+}
+
 export interface GetPageStatusMessage {
   type: "GET_PAGE_STATUS";
 }
@@ -172,7 +181,8 @@ export type ContentToBackgroundMessage =
   | ResetLanguageDataMessage
   | RequestAudioMessage
   | ReportPageSignalMessage
-  | AddPhraseToBankMessage;
+  | AddPhraseToBankMessage
+  | AssessTranslationMessage;
 
 export type PopupToContentMessage =
   | GetPageStatusMessage

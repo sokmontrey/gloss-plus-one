@@ -17,6 +17,43 @@ function escapeHtml(value: string): string {
     .replace(/'/g, "&#39;");
 }
 
+function computeSimpleDiff(original: string, modified: string): string {
+  const oWords = original.split(/\s+/);
+  const mWords = modified.split(/\s+/);
+  
+  const memo: number[][] = Array(oWords.length + 1).fill(0).map(() => Array(mWords.length + 1).fill(0));
+  for (let i = 1; i <= oWords.length; i++) {
+    for (let j = 1; j <= mWords.length; j++) {
+      if (oWords[i - 1].toLowerCase() === mWords[j - 1].toLowerCase()) {
+        memo[i][j] = memo[i - 1][j - 1] + 1;
+      } else {
+        memo[i][j] = Math.max(memo[i - 1][j], memo[i][j - 1]);
+      }
+    }
+  }
+  
+  let i = oWords.length, j = mWords.length;
+  const diff: { text: string; type: 'add' | 'remove' | 'keep' }[] = [];
+  while (i > 0 || j > 0) {
+    if (i > 0 && j > 0 && oWords[i - 1].toLowerCase() === mWords[j - 1].toLowerCase()) {
+      diff.unshift({ text: oWords[i - 1], type: 'keep' });
+      i--; j--;
+    } else if (j > 0 && (i === 0 || memo[i][j - 1] >= memo[i - 1][j])) {
+      diff.unshift({ text: mWords[j - 1], type: 'add' });
+      j--;
+    } else if (i > 0 && (j === 0 || memo[i][j - 1] < memo[i - 1][j])) {
+      diff.unshift({ text: oWords[i - 1], type: 'remove' });
+      i--;
+    }
+  }
+  
+  return diff.map(d => {
+    if (d.type === 'add') return `<span style="color: #34d399; font-weight: 500;">${escapeHtml(d.text)}</span>`;
+    if (d.type === 'remove') return `<span style="color: #f87171; text-decoration: line-through;">${escapeHtml(d.text)}</span>`;
+    return `<span style="color: #d1d5db;">${escapeHtml(d.text)}</span>`;
+  }).join(" ");
+}
+
 function ensureSelectionEl(): HTMLElement {
   if (!selectionEl) {
     selectionEl = document.createElement("div");
@@ -95,6 +132,15 @@ function showSelectionPlayer(text: string, language: string, selection: Selectio
       ">
         + Learn
       </button>
+      <button id="gloss-selection-tryout" style="
+        display: inline-flex; align-items: center; gap: 4px;
+        padding: 4px 10px; background: rgba(59,130,246,0.2);
+        color: rgba(59,130,246,1); border: none; border-radius: 16px;
+        font-size: 12px; font-family: system-ui; cursor: pointer;
+        white-space: nowrap;
+      ">
+        📝 Try out
+      </button>
     </div>
   `;
 
@@ -109,7 +155,8 @@ function showSelectionPlayer(text: string, language: string, selection: Selectio
 
   const playButton = root.querySelector("#gloss-selection-play");
   const addButton = root.querySelector("#gloss-selection-add");
-  if (!(playButton instanceof HTMLElement) || !(addButton instanceof HTMLElement)) {
+  const tryOutButton = root.querySelector("#gloss-selection-tryout");
+  if (!(playButton instanceof HTMLElement) || !(addButton instanceof HTMLElement) || !(tryOutButton instanceof HTMLElement)) {
     console.warn("[GlossPlusOne:selection] Selection player buttons not found after render");
     return;
   }
@@ -217,6 +264,83 @@ function showSelectionPlayer(text: string, language: string, selection: Selectio
         }
       },
     );
+  });
+
+  tryOutButton.addEventListener("mousedown", (event) => {
+    console.log("[GlossPlusOne:selection] Try out button mousedown");
+    event.preventDefault();
+    event.stopPropagation();
+  });
+
+  tryOutButton.addEventListener("click", () => {
+    console.log("[GlossPlusOne:selection] Try out button clicked", { text, language });
+    root.innerHTML = `
+      <div style="
+        display: flex; flex-direction: column; gap: 8px;
+        background: #1f2937; border-radius: 12px; padding: 12px;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.3); min-width: 200px; max-width: 300px;
+      ">
+        <div style="color: #9ca3af; font-size: 12px; font-family: system-ui; margin-bottom: 4px;">
+          Translate: <span style="color: white; font-weight: 500;">"${escapeHtml(displayText)}"</span>
+        </div>
+        <input id="gloss-tryout-input" type="text" placeholder="Type translation here..." style="
+          width: 100%; box-sizing: border-box; padding: 8px 12px; border-radius: 8px;
+          border: 1px solid #4b5563; background: #374151; color: white;
+          font-size: 13px; font-family: system-ui; outline: none;
+        " autocomplete="off" />
+        <div id="gloss-tryout-result" style="display: none; flex-direction: column; gap: 4px; font-size: 12px; font-family: system-ui;">
+        </div>
+      </div>
+    `;
+
+    const input = root.querySelector("#gloss-tryout-input") as HTMLInputElement;
+    const resultContainer = root.querySelector("#gloss-tryout-result") as HTMLElement;
+
+    if (input) {
+      input.focus();
+
+      input.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" && input.value.trim()) {
+          const userTranslation = input.value.trim();
+          input.disabled = true;
+          resultContainer.style.display = "flex";
+          resultContainer.innerHTML = '<span style="color: #60a5fa;">Evaluating...</span>';
+
+          chrome.runtime.sendMessage(
+            {
+              type: "ASSESS_TRANSLATION",
+              payload: { phrase: text, userTranslation, language },
+            },
+            (response: { success: boolean; result?: { score: number; most_correct_translation: string; feedback: string } }) => {
+              if (response?.success && response.result) {
+                const { score, most_correct_translation, feedback } = response.result;
+                const scoreColor = score >= 4 ? "#34d399" : score >= 2 ? "#fbbf24" : "#f87171";
+                const diffHtml = computeSimpleDiff(userTranslation, most_correct_translation);
+
+                resultContainer.innerHTML = `
+                  <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 4px;">
+                    <span style="font-weight: bold; color: ${scoreColor};">Score: ${score}/5</span>
+                  </div>
+                  <div style="color: #e5e7eb; margin-top: 4px;">
+                    <span style="color: #9ca3af;">Correction:</span> ${diffHtml}
+                  </div>
+                  <div style="color: #d1d5db; font-style: italic; margin-top: 2px;">
+                    ${escapeHtml(feedback)}
+                  </div>
+                `;
+                window.setTimeout(hideSelectionPlayer, 8000); // Wait longer so they can read feedback
+              } else {
+                resultContainer.innerHTML = '<span style="color: #f87171;">Failed to evaluate.</span>';
+                input.disabled = false;
+                input.focus();
+              }
+            }
+          );
+        } else if (e.key === "Escape") {
+          hideSelectionPlayer();
+        }
+      });
+    }
   });
 }
 
