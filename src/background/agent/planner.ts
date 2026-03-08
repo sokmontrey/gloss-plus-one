@@ -16,6 +16,7 @@ const PAGE_DISCOVERY_CHUNK_OVERLAP_CHARS = 250;
 const PAGE_DISCOVERY_MAX_CHUNKS = 3;
 const PAGE_DISCOVERY_MIN_RESULTS = 5;
 const PAGE_DISCOVERY_MAX_RESULTS = 8;
+const STRUCTURAL_TRANSLATION_BATCH_SIZE = 10;
 
 function normalizePhrase(value: string): string {
   return value.replace(/\s+/g, " ").trim();
@@ -251,6 +252,19 @@ function splitDiscoveryTextIntoChunks(text: string): string[] {
   return chunks;
 }
 
+function chunkArray<T>(items: T[], size: number): T[][];
+function chunkArray<T>(items: T[], size: number): T[][] {
+  if (size <= 0) {
+    return [items];
+  }
+
+  const chunks: T[][] = [];
+  for (let index = 0; index < items.length; index += size) {
+    chunks.push(items.slice(index, index + size));
+  }
+  return chunks;
+}
+
 function buildPageDiscoveryPrompt(
   excerpt: string,
   context: DiscoveryPromptContext,
@@ -439,12 +453,21 @@ export async function ensureStructuralTranslations(
     `[GlossPlusOne:planner] Translating ${untranslated.length} structural phrases to ${language}`,
   );
 
-  const prompt = `Translate these English phrases to ${language}.
+  try {
+    const parsed: Array<{
+      phrase: string;
+      targetPhrase: string;
+    }> = [];
+
+    const batches = chunkArray(untranslated, STRUCTURAL_TRANSLATION_BATCH_SIZE);
+    for (const [index, batch] of batches.entries()) {
+      const prompt = `Translate these English phrases to ${language}.
 Native language context: ${nativeLanguage}
 Use the most natural, commonly used equivalent. Not literal translation.
+Batch ${index + 1}/${batches.length}. Translate every phrase in this batch.
 
 Phrases to translate:
-${untranslated.map((phrase) => `"${phrase.phrase}"`).join("\n")}
+${batch.map((phrase) => `"${phrase.phrase}"`).join("\n")}
 
 Return a JSON array and nothing else. No markdown. Start with [.
 [
@@ -452,13 +475,23 @@ Return a JSON array and nothing else. No markdown. Start with [.
   { "phrase": "however", "targetPhrase": "cependant" }
 ]`;
 
-  try {
-    const raw = await callPlannerLLM(prompt);
-    const parsed = parseJsonResponse(raw) as Array<{
-      phrase: string;
-      targetPhrase: string;
-    }>;
-    if (!Array.isArray(parsed)) {
+      const raw = await callPlannerLLM(prompt);
+      console.log("[GlossPlusOne:planner] Structural translation raw response:", {
+        batch: `${index + 1}/${batches.length}`,
+        raw,
+      });
+
+      const batchParsed = parseJsonResponse(raw) as Array<{
+        phrase: string;
+        targetPhrase: string;
+      }>;
+
+      if (Array.isArray(batchParsed)) {
+        parsed.push(...batchParsed);
+      }
+    }
+
+    if (parsed.length === 0) {
       return;
     }
 
