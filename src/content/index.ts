@@ -57,18 +57,20 @@ function buildInstructionsFromBank(
 
   for (const paragraph of paragraphs) {
     const sourceText = normalizeText(paragraph.text);
+    const searchableText = sourceText.toLowerCase();
     const usedRanges: Array<{ start: number; end: number }> = [];
 
     for (const bankPhrase of sortedBank) {
-      const normalizedPhrase = normalizeText(bankPhrase.phrase).toLowerCase();
-      if (!normalizedPhrase) {
+      const phraseText = normalizeText(bankPhrase.phrase).toLowerCase();
+      if (!phraseText) {
         continue;
       }
 
-      const regex = new RegExp(`\\b${escapeRegExp(normalizedPhrase)}\\b`, "gi");
+      // Fresh regex per paragraph/phrase prevents lastIndex leakage across paragraphs.
+      const regex = new RegExp(`\\b${escapeRegExp(phraseText)}\\b`, "gi");
       let match: RegExpExecArray | null = null;
 
-      while ((match = regex.exec(sourceText.toLowerCase())) !== null) {
+      while ((match = regex.exec(searchableText)) !== null) {
         const range = { start: match.index, end: match.index + match[0].length };
         if (usedRanges.some((usedRange) => rangesOverlap(usedRange, range))) {
           continue;

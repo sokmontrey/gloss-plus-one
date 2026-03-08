@@ -93,7 +93,14 @@ export function applyReplacement(instruction: ReplacementInstruction): boolean {
     return false;
   }
 
-  if (el.querySelector(`[${GLOSS_MARKER_ATTR}="${instruction.id}"]`)) return true;
+  if (el.querySelector(`.${GLOSS_WRAPPER_CLASS}`)) {
+    console.warn("[GlossPlusOne:renderer] Skipping already-replaced node");
+    return false;
+  }
+
+  if (el.querySelector(`[${GLOSS_MARKER_ATTR}="${instruction.id}"]`)) {
+    return false;
+  }
 
   const chunks = getChunksFromElement(el);
   const normalizedSource = instruction.sourceText.replace(/\s+/g, " ").trim();
