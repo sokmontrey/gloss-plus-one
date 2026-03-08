@@ -3,6 +3,7 @@ import type { ProgressionConfig } from "@/shared/types";
 import { isPlaying, playAudio, requestAndPlay } from "./audioPlayer";
 
 const hoverTimers = new Map<string, ReturnType<typeof setTimeout>>();
+const decayedPhraseIds = new Set<string>();
 let tooltipEl: HTMLElement | null = null;
 let activeSpan: HTMLElement | null = null;
 let activeConfig: ProgressionConfig | null = null;
@@ -258,7 +259,13 @@ function handleMouseOver(event: MouseEvent): void {
     clearTimeout(existingTimer);
   }
 
+  if (decayedPhraseIds.has(phraseId)) {
+    hoverTimers.delete(phraseId);
+    return;
+  }
+
   const timer = window.setTimeout(() => {
+    decayedPhraseIds.add(phraseId);
     void chrome.runtime.sendMessage({
       type: "RECORD_HOVER_DECAY",
       payload: {
@@ -271,6 +278,7 @@ function handleMouseOver(event: MouseEvent): void {
     const nextConfidence = Math.max(currentConfidence - config.confidenceDecayPerHover, 0);
     span.setAttribute("data-gloss-confidence", String(nextConfidence));
     span.style.setProperty("--gloss-confidence", String(nextConfidence));
+    hoverTimers.delete(phraseId);
   }, config.hoverDecayThresholdMs);
 
   hoverTimers.set(phraseId, timer);
