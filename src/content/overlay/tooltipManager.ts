@@ -11,6 +11,9 @@ const DEFAULT_HOVER_CONFIG: Pick<
   hoverDecayThresholdMs: 2000,
 };
 
+/** Duration for the confidence bar drain animation (faster than hover threshold). */
+const CONFIDENCE_ANIMATION_MS = 550;
+
 const hoverTimers = new Map<string, ReturnType<typeof window.setTimeout>>();
 const decayedPhraseIds = new Set<string>();
 
@@ -34,31 +37,37 @@ function clampConfidence(value: number): number {
   return Math.max(0, Math.min(1, value));
 }
 
+/** Green (high) → amber → red (low) by confidence level. */
 function getConfidenceTone(confidence: number): {
   fill: string;
   text: string;
   glow: string;
 } {
-  if (confidence >= 0.75) {
+  if (confidence >= 0.7) {
     return {
-      fill: "linear-gradient(90deg, rgba(34,197,94,0.95), rgba(132,204,22,0.95))",
-      text: "#3f6212",
-      glow: "rgba(132, 204, 22, 0.25)",
+      fill: "linear-gradient(90deg, rgba(34,197,94,0.95), rgba(74,222,128,0.95))",
+      text: "#166534",
+      glow: "rgba(34, 197, 94, 0.28)",
     };
   }
-
-  if (confidence >= 0.45) {
+  if (confidence >= 0.5) {
     return {
-      fill: "linear-gradient(90deg, rgba(245,158,11,0.95), rgba(251,191,36,0.95))",
-      text: "#92400e",
-      glow: "rgba(251, 191, 36, 0.24)",
+      fill: "linear-gradient(90deg, rgba(134,239,172,0.95), rgba(253,224,71,0.95))",
+      text: "#854d0e",
+      glow: "rgba(253, 224, 71, 0.22)",
     };
   }
-
+  if (confidence >= 0.3) {
+    return {
+      fill: "linear-gradient(90deg, rgba(253,224,71,0.95), rgba(251,146,60,0.95))",
+      text: "#c2410c",
+      glow: "rgba(251, 146, 60, 0.24)",
+    };
+  }
   return {
-    fill: "linear-gradient(90deg, rgba(244,63,94,0.95), rgba(251,113,133,0.95))",
+    fill: "linear-gradient(90deg, rgba(251,113,133,0.95), rgba(244,63,94,0.95))",
     text: "#be123c",
-    glow: "rgba(251, 113, 133, 0.22)",
+    glow: "rgba(244, 63, 94, 0.24)",
   };
 }
 
@@ -205,8 +214,28 @@ function showTooltip(span: HTMLElement): void {
       <strong>Pronunciation:</strong> ${escapeHtml(pronunciation)}
     </div>
     <div style="margin-top:10px">
-      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
-        <span style="font-size:11px;font-weight:600;color:#6b7280">Confidence</span>
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:6px">
+        <span style="display:inline-flex;align-items:center;gap:4px;font-size:11px;font-weight:600;color:#6b7280">
+          Confidence
+          <span
+            data-confidence-info
+            title="Long hover on this phrase reduces its confidence by ${Math.round(hoverConfig.confidenceDecayPerHover * 100)}%."
+            style="
+              display:inline-flex;
+              align-items:center;
+              justify-content:center;
+              width:14px;
+              height:14px;
+              border-radius:50%;
+              background:rgba(148,163,184,0.25);
+              color:#64748b;
+              font-size:10px;
+              font-weight:700;
+              cursor:help;
+              line-height:1;
+            "
+          >ℹ</span>
+        </span>
         <span
           data-confidence-value
           style="font-size:11px;font-weight:700;color:${confidenceTone.text};transition:color 180ms ease"
@@ -233,22 +262,11 @@ function showTooltip(span: HTMLElement): void {
             background:${confidenceTone.fill};
             box-shadow:0 0 0 1px ${confidenceTone.glow};
             transition:
-              width ${hoverConfig.hoverDecayThresholdMs}ms linear,
-              background 220ms ease,
-              box-shadow 220ms ease;
+              width ${CONFIDENCE_ANIMATION_MS}ms linear,
+              background 200ms ease,
+              box-shadow 200ms ease;
           "
         ></div>
-      </div>
-      <div
-        data-confidence-note
-        style="
-          margin-top:5px;
-          font-size:10px;
-          color:#94a3b8;
-          transition:color 220ms ease;
-        "
-      >
-        Long hover reduces this phrase by ${Math.round(hoverConfig.confidenceDecayPerHover * 100)}%.
       </div>
     </div>
     <button
@@ -292,18 +310,15 @@ function showTooltip(span: HTMLElement): void {
 
     const fillEl = tooltip.querySelector("[data-confidence-fill]");
     const valueEl = tooltip.querySelector("[data-confidence-value]");
-    const noteEl = tooltip.querySelector("[data-confidence-note]");
     if (
       fillEl instanceof HTMLElement &&
       valueEl instanceof HTMLElement &&
-      noteEl instanceof HTMLElement &&
       !decayedPhraseIds.has(span.getAttribute("data-gloss-phrase-id") ?? "")
     ) {
       fillEl.style.width = `${Math.round(projectedConfidence * 100)}%`;
       fillEl.style.background = projectedTone.fill;
       fillEl.style.boxShadow = `0 0 0 1px ${projectedTone.glow}`;
       valueEl.style.color = projectedTone.text;
-      noteEl.style.color = projectedTone.text;
     }
   });
 }
@@ -325,7 +340,6 @@ function applyDecayToSpan(span: HTMLElement): void {
   const tooltip = getTooltipEl();
   const fillEl = tooltip.querySelector("[data-confidence-fill]");
   const valueEl = tooltip.querySelector("[data-confidence-value]");
-  const noteEl = tooltip.querySelector("[data-confidence-note]");
   const tone = getConfidenceTone(nextConfidence);
   if (fillEl instanceof HTMLElement) {
     fillEl.style.width = `${Math.round(nextConfidence * 100)}%`;
@@ -335,10 +349,6 @@ function applyDecayToSpan(span: HTMLElement): void {
   if (valueEl instanceof HTMLElement) {
     valueEl.textContent = `${Math.round(nextConfidence * 100)}%`;
     valueEl.style.color = tone.text;
-  }
-  if (noteEl instanceof HTMLElement) {
-    noteEl.textContent = `Confidence dropped after the hover reveal.`;
-    noteEl.style.color = tone.text;
   }
 
   void chrome.runtime.sendMessage({
