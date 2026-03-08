@@ -3,13 +3,32 @@ import { isReadableParagraph } from "./parser/filter";
 import { selectCandidateElements } from "./parser/selector";
 import type { ExtractedParagraph } from "./types";
 
+function getOriginalTextContent(node: Node): string {
+  if (node.nodeType === Node.TEXT_NODE) {
+    return node.textContent || "";
+  }
+  if (node.nodeType === Node.ELEMENT_NODE) {
+    const el = node as Element;
+    if (el.hasAttribute("data-gloss-source")) {
+      return el.getAttribute("data-gloss-source") || "";
+    }
+  }
+  let text = "";
+  for (let i = 0; i < node.childNodes.length; i++) {
+    text += getOriginalTextContent(node.childNodes[i]);
+  }
+  return text;
+}
+
 function splitTextIntoParagraphs(element: Element): string[] {
+  const fullText = getOriginalTextContent(element);
+
   if (element.tagName.toLowerCase() === "p") {
-    const text = (element.textContent ?? "").trim();
+    const text = fullText.replace(/\s+/g, " ").trim();
     return text ? [text] : [];
   }
 
-  const text = (element.textContent ?? "")
+  const text = fullText
     .replace(/\n{3,}/g, "\n\n")
     .split(/\n\s*\n/g)
     .map((s) => s.replace(/\s+/g, " ").trim())

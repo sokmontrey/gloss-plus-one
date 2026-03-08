@@ -6,7 +6,6 @@ import { initHoverListeners } from "./overlay/tooltipManager";
 import { initSelectionPlayer } from "./overlay/selectionPlayer";
 import { isPageDisabled } from "@/shared/pageDisable";
 import { BANK_KEY, getPhraseBankFromSnapshot } from "@/shared/phraseBankStorage";
-import { getActivePhrases } from "@/shared/structuralPhrases";
 import type { PopupToContentMessage, ReplacementInstruction } from "@/shared/messages";
 import type { BankPhrase, UserContext } from "@/shared/types";
 
@@ -20,16 +19,17 @@ let waitingForInitialBank = false;
 let discoveryStarted = false;
 let currentTier = 1;
 let lastPhraseSignature = "";
+const DEBUG_PHRASE = "we have";
 
 function getRenderableBank(bank: BankPhrase[], tier: number): BankPhrase[] {
-  const activeStructuralPhrases = new Set(
-    getActivePhrases(tier).map((phrase) => phrase.phrase),
-  );
   return bank.filter((phrase) => {
     if (phrase.phraseType !== "structural") {
       return true;
     }
-    return activeStructuralPhrases.has(phrase.phrase);
+
+    // Page-discovered grammar chunks can also be marked structural. Gate all
+    // structural phrases by their stored tier instead of the static seed list.
+    return phrase.tier <= tier;
   });
 }
 
@@ -49,17 +49,40 @@ function buildInstructions(
 
   for (const paragraph of paragraphs) {
     const usedRanges: Array<[number, number]> = [];
+    const paragraphHasDebugPhrase = paragraph.text.toLowerCase().includes(DEBUG_PHRASE);
 
     for (const bankPhrase of sorted) {
       const escaped = bankPhrase.phrase.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-      const regex = new RegExp(`\\b${escaped}\\b`, "gi");
+      const regex = new RegExp(`(?<=^|[^\\p{L}\\p{N}_])(${escaped})(?=[^\\p{L}\\p{N}_]|$)`, "giu");
+      const isDebugPhrase = bankPhrase.phrase.toLowerCase() === DEBUG_PHRASE;
+      let matchedDebugPhrase = false;
 
       let match: RegExpExecArray | null;
       while ((match = regex.exec(paragraph.text)) !== null) {
+        if (isDebugPhrase) {
+          matchedDebugPhrase = true;
+          console.log("[GlossPlusOne:content] Debug phrase matched", {
+            phrase: bankPhrase.phrase,
+            domPath: paragraph.domPath,
+            matchText: match[0],
+            index: match.index,
+            context: paragraph.text.slice(Math.max(0, match.index - 40), Math.min(paragraph.text.length, match.index + match[0].length + 40)),
+          });
+        }
+
         const start = match.index;
         const end = start + match[0].length;
         const overlaps = usedRanges.some(([rangeStart, rangeEnd]) => start < rangeEnd && end > rangeStart);
         if (overlaps) {
+          if (isDebugPhrase) {
+            console.log("[GlossPlusOne:content] Debug phrase overlap prevented replacement", {
+              phrase: bankPhrase.phrase,
+              domPath: paragraph.domPath,
+              start,
+              end,
+              usedRanges,
+            });
+          }
           continue;
         }
 
@@ -76,6 +99,15 @@ function buildInstructions(
           isReinforcement: bankPhrase.exposures > 0,
           targetLanguage: bankPhrase.targetLanguage,
           phraseType: bankPhrase.phraseType,
+        });
+      }
+
+      if (isDebugPhrase && paragraphHasDebugPhrase && !matchedDebugPhrase) {
+        console.log("[GlossPlusOne:content] Debug phrase present in paragraph but regex found no match", {
+          phrase: bankPhrase.phrase,
+          domPath: paragraph.domPath,
+          regex: regex.source,
+          paragraphPreview: paragraph.text.slice(0, 240),
         });
       }
     }
@@ -130,6 +162,27 @@ function renderFromBank(bank: BankPhrase[]): void {
   if (paragraphs.length === 0) {
     console.log("[GlossPlusOne:content] No readable paragraphs found");
     return;
+  }
+
+  const debugPhraseEntries = bank.filter((phrase) => phrase.phrase.toLowerCase() === DEBUG_PHRASE);
+  if (debugPhraseEntries.length > 0) {
+    console.log("[GlossPlusOne:content] Debug phrase in renderable bank", {
+      phrase: DEBUG_PHRASE,
+      count: debugPhraseEntries.length,
+      entries: debugPhraseEntries.map((phrase) => ({
+        id: phrase.id,
+        phraseType: phrase.phraseType,
+        tier: phrase.tier,
+        targetPhrase: phrase.targetPhrase,
+      })),
+      paragraphsContainingPhrase: paragraphs
+        .filter((paragraph) => paragraph.text.toLowerCase().includes(DEBUG_PHRASE))
+        .map((paragraph) => ({
+          domPath: paragraph.domPath,
+          preview: paragraph.text.slice(0, 240),
+        }))
+        .slice(0, 10),
+    });
   }
 
   const instructions = buildInstructions(paragraphs, bank);

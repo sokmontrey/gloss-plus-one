@@ -181,10 +181,10 @@ function getTierCefrBand(tier: number, fallback: UserContext["cefrBand"]): UserC
 
 export async function callPlannerLLM(prompt: string, responseMimeType = "application/json"): Promise<string> {
   try {
-    return await callGemini(prompt, responseMimeType);
-  } catch (error) {
-    console.warn("[GlossPlusOne:planner] Gemini failed, trying Groq:", error);
     return await callGroq(prompt, responseMimeType);
+  } catch (error) {
+    console.warn("[GlossPlusOne:planner] Groq failed, trying Gemini:", error);
+    return await callGemini(prompt, responseMimeType);
   }
 }
 
