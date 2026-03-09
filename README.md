@@ -154,14 +154,23 @@ Built with ❤️ at Hack Canada 2026
 ## 📧 Contact
 For support or questions, feel free to open an issue or reach out to the project maintainers!
 
-## Future of GlossPlusOne
-- Polish the current text extraction to minimize token input that's being sent to an llm
-- Implement additional frictionless assessment Pronunciation practice assessment: Use state of the art speech analysis service to provide user with quick pronunciation correction for phrases
-- Implement a better webpage content extraction that be able to determine better words and phrase
-- Implement a more comprehensive agentic user context (memory) management, concrete data grounding to avoid hallucination  
-- Deal with Right-To-Left language (RTL) (Arabic)
-- Even the definition itself will become more and more the target language as the user aquired necessary words or phrase to explain them.
-- Make everything production ready with centralize server for more efficient processing, word bank generation (can be reuse across user with similar preference), and informed replacement
+## What's next for GlossPlusOne (g+1)
+
+### Immediate Improvements
+- **Polish Text Extraction**: Minimize token input being sent to LLMs by improving our content extraction algorithm to better filter out non-essential page elements
+- **Better Content Differentiation**: Implement a more sophisticated webpage content extraction system that can better determine which words and phrases are worth replacing versus which are UI elements or navigation
+
+### Enhanced Assessment Features
+- **Additional Frictionless Assessment**: Expand on the passive skill tracking to capture more learning signals from user behavior
+- **Pronunciation Practice Self-Test**: Use state-of-the-art speech analysis services to provide users with quick pronunciation correction for phrases
+
+### Language & Technical Expansion
+- **Right-to-Left Language Support**: Deal with RTL languages like Arabic, which require different text handling and UI considerations
+- **Progressive Definition Localization**: Implement the feature where definitions themselves become more and more in the target language as the user acquires necessary words or phrases to explain them—keeping the immersion going even in the learning aids
+
+### Production & Scalability
+- **Centralized Server Architecture**: Make everything production-ready with a centralized server for more efficient processing, word bank generation (which can be reused across users with similar preferences), and informed replacement decisions
+- **Automatic Progression to Sentence Replacement**: Implement automatic switching from phrase replacement to sentence replacement for better embedded context translation once the ratio of target language phrases in the user's bank is high enough
 
 <div align="center">
 Happy Learning! 🌍📚<br>
