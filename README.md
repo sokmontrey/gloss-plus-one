@@ -2,7 +2,7 @@
 
 <div align="center">
 A Chrome browser extension for immersive language learning<br>
-Built at Hack Canada 2026 🇨🇦
+Built at Hack Canada 2026 🇨🇦<br>
 </div>
 
 ## 🌟 Overview
@@ -143,6 +143,14 @@ Distributed under the MIT License. See `LICENSE` for more information.
 
 ## 🏆 Hackathon
 Built with ❤️ at Hack Canada 2026
+
+**Awards**
+- 🥈 Second Place Overall
+- 🥇 SPUR Founder Track - Build a Real Canadian Startup (Top 3)
+- 🏅 SPUR Founder Track - Build a Real Canadian Startup (Top 10)
+
+**Links**
+- [Devpost Submission](https://devpost.com/software/glossplusone)
 
 **Team**
 - Me, I, myself, and a will to love.
