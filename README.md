@@ -117,7 +117,7 @@ Transform passive learning into active practice:
 ### Gamification
 - Earn points for correct translations directly into your _Assessment Score_.
 - Track your learning streaks.
-- Consistently achieving high scores quickly bumps phrase confidence levels—unlocking the next tier of language difficulty.
+- Consistently achieving high scores quickly bumps phrase confidence levels, unlocking the next tier of language difficulty.
 - Monitor progress across different difficulty levels right in the popup overlay or the custom dashboard.
 
 ## 🛠️ Usage
@@ -165,20 +165,20 @@ For support or questions, feel free to open an issue or reach out to the project
 ## What's next for GlossPlusOne (g+1)
 
 ### Immediate Improvements
-- **Polish Text Extraction**: Minimize token input being sent to LLMs by improving our content extraction algorithm to better filter out non-essential page elements
-- **Better Content Differentiation**: Implement a more sophisticated webpage content extraction system that can better determine which words and phrases are worth replacing versus which are UI elements or navigation
+- [ ] **Polish Text Extraction**: Minimize token input being sent to LLMs by improving our content extraction algorithm to better filter out non-essential page elements
+- [ ] **Better Content Differentiation**: Implement a more sophisticated webpage content extraction system that can better determine which words and phrases are worth replacing versus which are UI elements or navigation
 
 ### Enhanced Assessment Features
-- **Additional Frictionless Assessment**: Expand on the passive skill tracking to capture more learning signals from user behavior
-- **Pronunciation Practice Self-Test**: Use state-of-the-art speech analysis services to provide users with quick pronunciation correction for phrases
+- [ ] **Additional Frictionless Assessment**: Expand on the passive skill tracking to capture more learning signals from user behavior
+- [ ] **Pronunciation Practice Self-Test**: Use state-of-the-art speech analysis services to provide users with quick pronunciation correction for phrases
 
 ### Language & Technical Expansion
-- **Right-to-Left Language Support**: Deal with RTL languages like Arabic, which require different text handling and UI considerations
-- **Progressive Definition Localization**: Implement the feature where definitions themselves become more and more in the target language as the user acquires necessary words or phrases to explain them—keeping the immersion going even in the learning aids
+- [ ] **Right-to-Left Language Support**: Deal with RTL languages like Arabic, which require different text handling and UI considerations
+- [ ] **Progressive Definition Localization**: Implement the feature where definitions themselves become more and more in the target language as the user acquires necessary words or phrases to explain them - keeping the immersion going even in the learning aids
 
 ### Production & Scalability
-- **Centralized Server Architecture**: Make everything production-ready with a centralized server for more efficient processing, word bank generation (which can be reused across users with similar preferences), and informed replacement decisions
-- **Automatic Progression to Sentence Replacement**: Implement automatic switching from phrase replacement to sentence replacement for better embedded context translation once the ratio of target language phrases in the user's bank is high enough
+- [ ] **Centralized Server Architecture**: Make everything production-ready with a centralized server for more efficient processing, word bank generation (which can be reused across users with similar preferences), and informed replacement decisions
+- [ ] **Automatic Progression to Sentence Replacement**: Implement automatic switching from phrase replacement to sentence replacement for better embedded context translation once the ratio of target language phrases in the user's bank is high enough
 
 <div align="center">
 Happy Learning! 🌍📚<br>
