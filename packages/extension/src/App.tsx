@@ -30,6 +30,7 @@ function getStatusCopy(session: AuthSessionState): string {
 }
 
 export default function App() {
+  const [signInAttempts, setSignInAttempts] = useState(0);
   const [session, setSession] = useState<AuthSessionState>(() => {
     const storedSession = loadStoredSession();
     return storedSession ?? { status: "checking" };
@@ -60,18 +61,32 @@ export default function App() {
 
   useEffect(() => {
     if (!isSigningIn) {
+      setSignInAttempts(0);
       return undefined;
     }
 
     const interval = window.setInterval(async () => {
       const nextSession = await refreshSession();
-      if (
-        nextSession.status === "authenticated" ||
-        nextSession.status === "error" ||
-        nextSession.status === "signed_out"
-      ) {
-        setIsSigningIn(false);
-      }
+      setSignInAttempts((current) => {
+        const nextCount = current + 1;
+        const timedOut = nextCount >= 20;
+
+        const shouldStopPolling =
+          nextSession.status === "authenticated" || timedOut;
+
+        if (shouldStopPolling) {
+          setIsSigningIn(false);
+          if (timedOut && nextSession.status === "signed_out") {
+            setSession({
+              status: "error",
+              message:
+                "Sign-in is still pending. Finish the Google flow, then click Refresh.",
+            });
+          }
+        }
+
+        return timedOut ? 0 : nextCount;
+      });
     }, SESSION_POLL_INTERVAL_MS);
 
     return () => {
