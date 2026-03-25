@@ -19,8 +19,8 @@ if (!Number.isInteger(port) || port < 1) throw new Error("PORT must be a positiv
 
 export const env = {
   supabaseUrl: required("SUPABASE_URL"),
-  supabaseAnonKey: required("SUPABASE_ANON_KEY"),
-  supabaseServiceRoleKey: required("SUPABASE_SERVICE_ROLE_KEY"),
+  supabasePublishableKey: required("SUPABASE_PUBLISHABLE_KEY"),
+  supabaseSecretKey: required("SUPABASE_SECRET_KEY"),
   supabaseJwtSecret: required("SUPABASE_JWT_SECRET"),
   port,
   corsOrigins: corsOriginsRaw.split(",").map((s) => s.trim()).filter(Boolean),
