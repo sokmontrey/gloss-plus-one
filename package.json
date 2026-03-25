@@ -5,7 +5,9 @@
   "scripts": {
     "dev": "turbo dev",
     "build": "turbo build",
-    "dev:server": "turbo dev --filter=@gpo/server"
+    "dev:server": "turbo dev --filter=@gpo/server",
+    "dev:extension": "turbo dev --filter=@gpo/extension",
+    "typecheck": "turbo typecheck"
   },
   "devDependencies": {
     "turbo": "^2.8.20",
