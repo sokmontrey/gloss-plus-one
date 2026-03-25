@@ -1,343 +1,52 @@
- :root {
-   color-scheme: light;
-   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-   line-height: 1.5;
-   font-weight: 400;
-   background: #f5f7fb;
-   color: #0f172a;
-   font-synthesis: none;
-   text-rendering: optimizeLegibility;
-   -webkit-font-smoothing: antialiased;
-   -moz-osx-font-smoothing: grayscale;
- }
+@import "tailwindcss";
 
- * {
-   box-sizing: border-box;
- }
-
- body {
-   margin: 0;
-   min-width: 360px;
-   min-height: 520px;
-   background:
-     radial-gradient(circle at top, rgba(59, 130, 246, 0.14), transparent 40%),
-     linear-gradient(180deg, #f8fbff 0%, #f4f7fb 100%);
- }
-
- button,
- input,
- textarea,
- select {
-   font: inherit;
- }
-
- button {
-   cursor: pointer;
- }
-
- #root {
-   min-height: 520px;
- }
-
- .app-shell {
-   min-height: 520px;
-   padding: 20px 16px;
-   display: flex;
-   align-items: stretch;
-   justify-content: center;
- }
-
- .card {
-   width: 100%;
-   background: rgba(255, 255, 255, 0.92);
-   backdrop-filter: blur(14px);
-   border: 1px solid rgba(148, 163, 184, 0.18);
-   border-radius: 20px;
-   box-shadow: 0 24px 48px rgba(15, 23, 42, 0.12);
-   padding: 20px;
-   display: flex;
-   flex-direction: column;
-   gap: 18px;
- }
-
- .eyebrow {
-   display: inline-flex;
-   align-items: center;
-   gap: 8px;
-   padding: 6px 10px;
-   width: fit-content;
-   border-radius: 999px;
-   background: rgba(37, 99, 235, 0.12);
-   color: #1d4ed8;
-   font-size: 12px;
-   font-weight: 700;
-   letter-spacing: 0.02em;
-   text-transform: uppercase;
- }
-
- .title {
-   margin: 0;
-   font-size: 26px;
-   line-height: 1.1;
- }
-
- .subtitle {
-   margin: 0;
-   color: #475569;
-   font-size: 14px;
- }
-
- .stack {
-   display: flex;
-   flex-direction: column;
-   gap: 12px;
- }
-
- .panel {
-   border-radius: 16px;
-   padding: 14px;
-   border: 1px solid #e2e8f0;
-   background: #f8fafc;
- }
-
- .panel-title {
-   margin: 0 0 6px;
-   font-size: 14px;
-   font-weight: 700;
-   color: #0f172a;
- }
-
- .panel-copy {
-   margin: 0;
-   color: #475569;
-   font-size: 13px;
- }
-
- .button {
-   width: 100%;
-   border: 0;
-   border-radius: 14px;
-   padding: 12px 14px;
-   font-weight: 700;
-   transition: transform 0.15s ease, box-shadow 0.15s ease, opacity 0.15s ease;
- }
-
- .button:hover:not(:disabled) {
-   transform: translateY(-1px);
- }
-
- .button:disabled {
-   opacity: 0.7;
-   cursor: default;
- }
-
- .button-primary {
-   background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
-   color: #fff;
-   box-shadow: 0 16px 24px rgba(37, 99, 235, 0.22);
- }
-
- .button-secondary {
-   background: #fff;
-   color: #0f172a;
-   border: 1px solid #cbd5e1;
- }
-
- .button-danger {
-   background: #fff1f2;
-   color: #be123c;
-   border: 1px solid #fecdd3;
- }
-
- .status-chip {
-   display: inline-flex;
-   align-items: center;
-   gap: 8px;
-   padding: 6px 10px;
-   border-radius: 999px;
-   background: #ecfdf5;
-   color: #047857;
-   font-size: 12px;
-   font-weight: 700;
-   width: fit-content;
- }
-
- .status-dot {
-   width: 8px;
-   height: 8px;
-   border-radius: 50%;
-   background: currentColor;
- }
-
- .profile {
-   display: flex;
-   flex-direction: column;
-   gap: 6px;
- }
-
- .profile-name {
-   margin: 0;
-   font-size: 18px;
-   font-weight: 800;
-   color: #0f172a;
- }
-
- .profile-meta {
-   margin: 0;
-   font-size: 13px;
-   color: #475569;
- }
-
- .hint {
-   margin: 0;
-   font-size: 12px;
-   color: #64748b;
- }
-
- .inline-actions {
-   display: flex;
-   gap: 10px;
- }
-
- .inline-actions > * {
-   flex: 1;
- }
-
- .notice {
-   padding: 12px 14px;
-   border-radius: 14px;
-   font-size: 13px;
-   line-height: 1.4;
- }
-
- .notice-error {
-   background: #fff1f2;
-   color: #9f1239;
-   border: 1px solid #fecdd3;
- }
-
- .notice-info {
-   background: #eff6ff;
-   color: #1d4ed8;
-   border: 1px solid #bfdbfe;
- }
-
- .list {
-   margin: 0;
-   padding-left: 18px;
-   display: flex;
-   flex-direction: column;
-   gap: 8px;
-   color: #334155;
-   font-size: 13px;
- }
-
- .row {
-   display: flex;
-   justify-content: space-between;
-   gap: 16px;
-   align-items: center;
- }
-
- .label {
-   font-size: 12px;
-   color: #64748b;
-   text-transform: uppercase;
-   letter-spacing: 0.04em;
-   font-weight: 700;
- }
-
- .value {
-   font-size: 13px;
-   color: #0f172a;
-   font-weight: 600;
-   word-break: break-word;
-   text-align: right;
- }
-
-.popup-shell {
-  min-height: 520px;
-  padding: 20px 16px;
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
+@theme {
+  --color-background: #f4f7fb;
+  --color-foreground: #0f172a;
+  --color-card: rgba(255, 255, 255, 0.9);
+  --color-card-foreground: #0f172a;
+  --color-popover: #ffffff;
+  --color-popover-foreground: #0f172a;
+  --color-primary: #2563eb;
+  --color-primary-foreground: #eff6ff;
+  --color-secondary: #ffffff;
+  --color-secondary-foreground: #0f172a;
+  --color-muted: #e2e8f0;
+  --color-muted-foreground: #475569;
+  --color-accent: #eff6ff;
+  --color-accent-foreground: #1d4ed8;
+  --color-destructive: #be123c;
+  --color-destructive-foreground: #fff1f2;
+  --color-border: rgba(148, 163, 184, 0.24);
+  --color-input: #cbd5e1;
+  --color-ring: rgba(37, 99, 235, 0.35);
+  --radius: 1rem;
+  --font-sans: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+    "Segoe UI", sans-serif;
+  --shadow-popup: 0 24px 48px rgba(15, 23, 42, 0.12);
 }
 
-.hero {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
+@layer base {
+  * {
+    @apply box-border border-border;
+  }
 
-.hero h1 {
-  margin: 0;
-  font-size: 28px;
-  line-height: 1.05;
-}
+  html {
+    color-scheme: light;
+  }
 
-.hero p {
-  margin: 0;
-  color: #475569;
-  font-size: 14px;
-}
+  body {
+    @apply m-0 min-h-[520px] min-w-[360px] bg-background font-sans text-foreground antialiased;
+    background:
+      radial-gradient(circle at top, rgba(59, 130, 246, 0.14), transparent 40%),
+      linear-gradient(180deg, #f8fbff 0%, #f4f7fb 100%);
+  }
 
-.hero__eyebrow {
-  display: inline-flex;
-  align-items: center;
-  width: fit-content;
-  border-radius: 999px;
-  padding: 6px 10px;
-  background: rgba(15, 23, 42, 0.06);
-  color: #1e293b;
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 0.03em;
-  text-transform: uppercase;
-}
+  button {
+    @apply cursor-pointer;
+  }
 
-.status-card {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  border-radius: 16px;
-  padding: 14px;
-  background: rgba(255, 255, 255, 0.92);
-  border: 1px solid rgba(148, 163, 184, 0.24);
-  box-shadow: 0 16px 32px rgba(15, 23, 42, 0.08);
-}
-
-.status-card__row {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 12px;
-}
-
-.status-card__label {
-  font-size: 12px;
-  color: #64748b;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  font-weight: 700;
-}
-
-.status-card__message {
-  margin: 0;
-  font-size: 14px;
-  color: #0f172a;
-}
-
-.ghost-button {
-  border: 1px solid #cbd5e1;
-  background: #ffffff;
-  color: #0f172a;
-  border-radius: 12px;
-  padding: 8px 12px;
-  font-size: 13px;
-  font-weight: 600;
-}
-
-.ghost-button:disabled {
-  opacity: 0.7;
-  cursor: default;
+  #root {
+    @apply min-h-[520px];
+  }
 }
