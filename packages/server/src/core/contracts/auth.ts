@@ -23,15 +23,11 @@ export interface AuthProvider {
 
   exchangeCode(params: {
     code: string
-    codeVerifier: string
-    redirectTo: string
+    codeVerifier?: string
+    redirectTo?: string
   }): Promise<{ user: AuthUser; session: ProviderSession }>
 
   refreshSession(params: { refreshToken: string }): Promise<ProviderSession>
-
-  getUser(params: { accessToken: string }): Promise<AuthUser>
-
-  signOut(params: { accessToken: string }): Promise<void>
 }
 
 export interface AuthContext {

@@ -85,8 +85,7 @@ export class AuthService {
     const session = await this.sessionStore.get(sid)
     if (!session) throw new HttpError(401, 'Unauthorized')
 
-    await this.refreshIfNeeded(sid, session)
-    const latest = (await this.sessionStore.get(sid)) ?? session
+    const latest = await this.getFreshSession(sid, session)
 
     return {
       userId: latest.userId,
@@ -99,10 +98,6 @@ export class AuthService {
 
   async logout(sid: string | undefined | null) {
     if (!sid) return
-    const session = await this.sessionStore.get(sid)
-    if (session) {
-      await this.authProvider.signOut({ accessToken: session.accessToken }).catch(() => undefined)
-    }
     await this.sessionStore.delete(sid)
   }
 
@@ -126,6 +121,11 @@ export class AuthService {
     await refreshPromise
   }
 
+  private async getFreshSession(sid: string, session: SessionData): Promise<SessionData> {
+    await this.refreshIfNeeded(sid, session)
+    return (await this.sessionStore.get(sid)) ?? session
+  }
+
   private async performRefresh(sid: string) {
     const current = await this.sessionStore.get(sid)
     if (!current) throw new HttpError(401, 'Unauthorized')
@@ -137,7 +137,7 @@ export class AuthService {
 
       await this.sessionStore.update(sid, {
         accessToken: refreshed.accessToken,
-        refreshToken: refreshed.refreshToken || current.refreshToken,
+        refreshToken: refreshed.refreshToken,
         expiresAt: refreshed.expiresAt,
         providerSessionId: refreshed.providerSessionId ?? current.providerSessionId,
       })

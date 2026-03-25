@@ -72,8 +72,8 @@ export class SupabaseAuthProvider implements AuthProvider {
 
   async exchangeCode(params: {
     code: string
-    codeVerifier: string
-    redirectTo: string
+    codeVerifier?: string
+    redirectTo?: string
   }): Promise<{ user: AuthUser; session: ProviderSession }> {
     const supabase = this.client()
 
@@ -112,11 +112,6 @@ export class SupabaseAuthProvider implements AuthProvider {
     }
 
     return toAuthUser(data.user)
-  }
-
-  async signOut(_params: { accessToken: string }): Promise<void> {
-    // For opaque-session BFF mode, local session revocation is authoritative.
-    // Supabase signOut can be called with a user-bound client when needed.
   }
 }
 
