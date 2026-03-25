@@ -2,5 +2,27 @@
   "name": "@gpo/server",
   "version": "0.1.0",
   "private": true,
-  "main": "src/index.ts"
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.57.4",
+    "cookie-parser": "^1.4.7",
+    "cors": "^2.8.5",
+    "dotenv": "^16.6.1",
+    "express": "^4.21.2",
+    "jose": "^6.1.0",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@types/cookie-parser": "^1.4.9",
+    "@types/cors": "^2.8.18",
+    "@types/express": "^4.17.23",
+    "@types/node": "^24.3.1",
+    "tsx": "^4.20.5"
+  }
 }
