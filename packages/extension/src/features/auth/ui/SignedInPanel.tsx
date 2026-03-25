@@ -1,16 +1,16 @@
-import type { AuthenticatedSessionState } from "../lib/auth";
+import type { AuthenticatedSessionState } from "../model/session";
 
-type LoggedInViewProps = {
+type SignedInPanelProps = {
   session: AuthenticatedSessionState;
   isLoggingOut: boolean;
   onLogout: () => Promise<void>;
 };
 
-export function LoggedInView({
+export function SignedInPanel({
   session,
   isLoggingOut,
   onLogout,
-}: LoggedInViewProps) {
+}: SignedInPanelProps) {
   const displayName =
     session.profile?.displayName?.trim() || session.user.email;
 

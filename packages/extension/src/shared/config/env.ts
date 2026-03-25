@@ -6,7 +6,7 @@ export function getBackendBaseUrl(): string {
   return value && value.length > 0 ? value : DEFAULT_API_BASE_URL;
 }
 
-export function getAuthRouteUrl(path: string): string {
+export function getBackendRouteUrl(path: string): string {
   const normalizedPath = path.startsWith("/") ? path : `/${path}`;
   return `${getBackendBaseUrl()}${normalizedPath}`;
 }

@@ -1,57 +1,18 @@
-import { getAuthRouteUrl, getBackendBaseUrl } from "./config";
+import { getBackendRouteUrl } from "../../../shared/config/env";
+import type { AuthSessionState, AuthSessionResponse } from "../model/session";
+import {
+  createErrorSessionState,
+  createSignedOutSessionState,
+} from "../model/session";
 
 export const SESSION_POLL_INTERVAL_MS = 1500;
-
-export type AuthSessionState =
-  | {
-      status: "checking";
-    }
-  | {
-      status: "signed_out";
-    }
-  | {
-      status: "authenticated";
-      user: {
-        userId: string;
-        email: string;
-      };
-      profile?: {
-        id?: string;
-        authUserId?: string;
-        email?: string;
-        displayName?: string | null;
-      } | null;
-    }
-  | {
-      status: "error";
-      message: string;
-    };
-
-export type AuthenticatedSessionState = Extract<
-  AuthSessionState,
-  { status: "authenticated" }
->;
-
-interface AuthSessionResponse {
-  status: "authenticated" | "unauthenticated";
-  user?: {
-    userId: string;
-    email: string;
-  };
-  profile?: {
-    id?: string;
-    authUserId?: string;
-    email?: string;
-    displayName?: string | null;
-  } | null;
-}
 
 function toErrorMessage(error: unknown, fallback: string): string {
   return error instanceof Error ? error.message : fallback;
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${getBackendBaseUrl()}${path}`, {
+  const response = await fetch(getBackendRouteUrl(path), {
     ...init,
     credentials: "include",
     headers: {
@@ -71,12 +32,8 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return (await response.json()) as T;
 }
 
-export function getSignedOutState(): AuthSessionState {
-  return { status: "signed_out" };
-}
-
-export function getLoginUrl(): string {
-  return getAuthRouteUrl("/auth/google/start");
+export function getGoogleSignInUrl(): string {
+  return getBackendRouteUrl("/auth/google/start");
 }
 
 export async function getSession(): Promise<AuthSessionState> {
@@ -86,7 +43,7 @@ export async function getSession(): Promise<AuthSessionState> {
     });
 
     if (response.status === "unauthenticated" || !response.user) {
-      return getSignedOutState();
+      return createSignedOutSessionState();
     }
 
     return {
@@ -95,13 +52,12 @@ export async function getSession(): Promise<AuthSessionState> {
       profile: response.profile ?? null,
     };
   } catch (error) {
-    return {
-      status: "error",
-      message: toErrorMessage(
+    return createErrorSessionState(
+      toErrorMessage(
         error,
         "Unable to reach the auth backend. Check VITE_API_BASE_URL.",
       ),
-    };
+    );
   }
 }
 
