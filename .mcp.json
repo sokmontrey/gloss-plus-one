@@ -1,0 +1,8 @@
+{
+    "mcpServers": {
+        "why-graph": {
+            "command": "why-graph",
+            "args": ["mcp"]
+        }
+    }
+}

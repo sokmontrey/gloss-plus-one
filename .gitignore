@@ -2,3 +2,7 @@ node_modules
 dist
 .env
 .worktrees/
+
+# why-graph indexes (derived from .memory/)
+.memory/*.db
+.memory/*.sqlite

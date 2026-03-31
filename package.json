@@ -3,11 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "packageManager": "pnpm@10.32.1",
-  "scripts": {
-    "dev": "turbo dev",
-    "build": "turbo build",
-    "dev:server": "turbo dev --filter=@gpo/server"
-  },
+  "scripts": { },
   "devDependencies": {
     "turbo": "^2.8.20",
     "typescript": "^6.0.2"
