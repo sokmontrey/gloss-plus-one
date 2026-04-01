@@ -56,12 +56,6 @@ export function createAuthRoutes({ authAdapter, env }: AuthRoutesProps): Router 
 
     router.post("/google/url", async (req, res, next) => {
         try {
-            const redirectTo = req.body?.redirectTo;
-            if (typeof redirectTo !== "string" || redirectTo.length === 0) {
-                res.status(400).json({ error: "redirectTo is required" });
-                return;
-            }
-
             const state = randomUUID();
 
             res.cookie(OAUTH_STATE_COOKIE, state, {
@@ -73,7 +67,7 @@ export function createAuthRoutes({ authAdapter, env }: AuthRoutesProps): Router 
             });
 
             const url = await authAdapter.getGoogleOAuthUrl({
-                redirectTo,
+                redirectTo: env.GOOGLE_OAUTH_REDIRECT_TO,
                 state,
                 prompt: parsePrompt(req.body?.prompt),
                 loginHint:

@@ -3,6 +3,7 @@ import { z } from "zod";
 const envSchema = z.object({
     SB_AUTH_GOOGLE_CLIENT_ID: z.string().min(1),
     SB_AUTH_GOOGLE_SECRET: z.string().min(1),
+    GOOGLE_OAUTH_REDIRECT_TO: z.string().url(),
     GOOGLE_OAUTH_CALLBACK_URL: z.string().url(),
     CORS_ORIGINS: z
         .string()
