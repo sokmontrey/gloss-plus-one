@@ -15,6 +15,19 @@ importers:
         specifier: latest
         version: 6.0.2
 
+  apps/api:
+    dependencies:
+      zod:
+        specifier: ^3.24.2
+        version: 3.25.76
+    devDependencies:
+      '@types/node':
+        specifier: ^22.13.0
+        version: 22.19.15
+      typescript:
+        specifier: latest
+        version: 6.0.2
+
   packages/shared:
     devDependencies:
       typescript:
@@ -53,6 +66,9 @@ packages:
     cpu: [arm64]
     os: [win32]
 
+  '@types/node@22.19.15':
+    resolution: {integrity: sha512-F0R/h2+dsy5wJAUe3tAU6oqa2qbWY5TpNfL/RGmo1y38hiyO1w3x2jPtt76wmuaJI4DQnOBu21cNXQ2STIUUWg==}
+
   turbo@2.9.2:
     resolution: {integrity: sha512-DUUWysctg/vax8W05UJcyrHm4LvxtX0umAT4bZB5lab4inNXTbwoYSFpdgqzBxON23j8ls3xGxvx0kwQz6Q8wQ==}
     hasBin: true
@@ -61,6 +77,12 @@ packages:
     resolution: {integrity: sha512-bGdAIrZ0wiGDo5l8c++HWtbaNCWTS4UTv7RaTH/ThVIgjkveJt83m74bBHMJkuCbslY8ixgLBVZJIOiQlQTjfQ==}
     engines: {node: '>=14.17'}
     hasBin: true
+
+  undici-types@6.21.0:
+    resolution: {integrity: sha512-iwDZqg0QAGrg9Rav5H4n0M64c3mkR59cJ6wQp+7C4nI0gsmExaedaYLNO44eT4AtBBwjbTiGPMlt2Md0T9H9JQ==}
+
+  zod@3.25.76:
+    resolution: {integrity: sha512-gzUt/qt81nXsFGKIFcC3YnfEAx5NkunCfnDlvuBSSFS02bcXu4Lmea0AFIUwbLWxWPx3d9p8S5QoaujKcNQxcQ==}
 
 snapshots:
 
@@ -82,6 +104,10 @@ snapshots:
   '@turbo/windows-arm64@2.9.2':
     optional: true
 
+  '@types/node@22.19.15':
+    dependencies:
+      undici-types: 6.21.0
+
   turbo@2.9.2:
     optionalDependencies:
       '@turbo/darwin-64': 2.9.2
@@ -92,3 +118,7 @@ snapshots:
       '@turbo/windows-arm64': 2.9.2
 
   typescript@6.0.2: {}
+
+  undici-types@6.21.0: {}
+
+  zod@3.25.76: {}
