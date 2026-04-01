@@ -6,12 +6,15 @@ import helmet from "helmet";
 import type { NextFunction, Request, Response } from "express";
 import { createRoutes } from "./src/routes.js";
 import { createEnv } from "./src/env.js";
+import { logger, requestLogger, type RequestWithLogger } from "./src/logger.js";
 
 const env = createEnv();
 
 const app = express();
 
 app.set("trust proxy", 1);
+
+app.use(requestLogger);
 
 app.use(
     helmet({
@@ -45,11 +48,12 @@ app.use(express.urlencoded({ extended: false, limit: "1mb" }));
 
 app.use("/api", createRoutes(env));
 
-app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
-    console.error(err);
+app.use((err: unknown, req: Request, res: Response, _next: NextFunction) => {
+    (req as RequestWithLogger).log?.error({ err }, "Unhandled request error");
+    logger.error({ err }, "Unhandled application error");
     res.status(500).json({ error: "internal server error" });
 });
 
 app.listen(env.PORT, () => {
-    console.log(`api listening on port ${env.PORT}`);
+    logger.info({ port: env.PORT }, "API listening");
 });
