@@ -7,6 +7,6 @@ export function createRoutes(env: Env) {
     const authAdapter = createSupabaseAuthAdapter(env);
 
     const router = Router();
-    router.use("/auth", createAuthRoutes(authAdapter));
+    router.use("/auth", createAuthRoutes({ authAdapter, env }));
     return router;
 }
