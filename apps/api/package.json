@@ -9,8 +9,10 @@
         "start": "node dist/index.js"
     },
     "dependencies": {
+        "@gloss/env": "workspace:*",
         "@gloss/shared": "workspace:*",
-        "@supabase/supabase-js": "^2.49.1"
+        "@supabase/supabase-js": "^2.49.1",
+        "dotenv": "^16.4.7"
     },
     "devDependencies": {
         "tsx": "^4.19.3",

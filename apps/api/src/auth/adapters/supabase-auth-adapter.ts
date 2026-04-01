@@ -11,7 +11,8 @@ import { GOOGLE_AUTH_PROVIDER } from "@gloss/shared/adapters/auth"
 /** Same values as createClient(); used for PKCE token URL + logout. */
 export type SupabaseAuthAdapterConfig = {
     supabaseUrl: string
-    supabaseAnonKey: string
+    /** Supabase anon / publishable key (public client). */
+    supabasePublishableKey: string
     /**
      * Per-request client (Express: closure over req/res). Use PKCE + storage that survives the OAuth redirect
      * (e.g. cookie adapter). See https://supabase.com/docs/guides/auth/server-side/oauth-with-pkce-flow-for-ssr
@@ -42,7 +43,7 @@ function authApiRoot(supabaseUrl: string): string {
 }
 
 async function exchangePkce(
-    config: Pick<SupabaseAuthAdapterConfig, "supabaseUrl" | "supabaseAnonKey">,
+    config: Pick<SupabaseAuthAdapterConfig, "supabaseUrl" | "supabasePublishableKey">,
     authCode: string,
     codeVerifier: string,
 ): Promise<Session> {
@@ -52,8 +53,8 @@ async function exchangePkce(
             method: "POST",
             headers: {
                 "Content-Type": "application/json",
-                apikey: config.supabaseAnonKey,
-                Authorization: `Bearer ${config.supabaseAnonKey}`,
+                apikey: config.supabasePublishableKey,
+                Authorization: `Bearer ${config.supabasePublishableKey}`,
             },
             body: JSON.stringify({
                 auth_code: authCode,
@@ -77,7 +78,7 @@ async function exchangePkce(
 }
 
 export function createSupabaseAuthAdapter(config: SupabaseAuthAdapterConfig): AuthAdapter {
-    const { supabaseUrl, supabaseAnonKey, getClient } = config
+    const { supabaseUrl, supabasePublishableKey, getClient } = config
 
     return {
         async getGoogleOAuthUrl(redirectTo, state) {
@@ -133,7 +134,7 @@ export function createSupabaseAuthAdapter(config: SupabaseAuthAdapterConfig): Au
                     method: "POST",
                     headers: {
                         "Content-Type": "application/json",
-                        apikey: supabaseAnonKey,
+                        apikey: supabasePublishableKey,
                         Authorization: `Bearer ${accessToken}`,
                     },
                 },
@@ -151,14 +152,14 @@ export function createSupabaseAuthAdapter(config: SupabaseAuthAdapterConfig): Au
  */
 export function createSupabaseServerClient(
     supabaseUrl: string,
-    supabaseAnonKey: string,
+    supabasePublishableKey: string,
     storage: {
         getItem: (key: string) => Promise<string | null> | string | null
         setItem: (key: string, value: string) => Promise<void> | void
         removeItem: (key: string) => Promise<void> | void
     },
 ): SupabaseClient {
-    return createClient(supabaseUrl, supabaseAnonKey, {
+    return createClient(supabaseUrl, supabasePublishableKey, {
         auth: {
             storage,
             flowType: "pkce",
