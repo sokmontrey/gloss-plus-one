@@ -1,1 +1,1 @@
-export * from './adapters/auth.js'
+export * from './adapters/index.js'
