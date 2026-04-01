@@ -1,0 +1,19 @@
+{
+    "name": "@gloss/api",
+    "version": "0.0.0",
+    "private": true,
+    "type": "module",
+    "scripts": {
+        "dev": "tsx watch src/index.ts",
+        "build": "tsc",
+        "start": "node dist/index.js"
+    },
+    "dependencies": {
+        "@gloss/shared": "workspace:*",
+        "@supabase/supabase-js": "^2.49.1"
+    },
+    "devDependencies": {
+        "tsx": "^4.19.3",
+        "typescript": "latest"
+    }
+}

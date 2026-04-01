@@ -157,3 +157,21 @@ dist
 # End of https://www.toptal.com/developers/gitignore/api/turbo,node
 .cursorrules
 .memory/
+
+# Dependencies
+node_modules
+
+# pnpm virtual store (optional, see below)
+.pnpm
+.pnpm*
+
+# Build artifacts
+dist
+build
+*.log
+coverage
+
+# OS and IDE files
+.DS_Store
+.vscode
+.idea
