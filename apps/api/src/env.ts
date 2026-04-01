@@ -27,4 +27,7 @@ const envSchema = z.object({
 
 export type Env = z.infer<typeof envSchema>;
 
-export const env: Env = envSchema.parse(process.env);
+/** Parse env once at process startup (or pass a stub in tests). Throws ZodError if invalid. */
+export function createEnv(source: NodeJS.ProcessEnv = process.env): Env {
+    return envSchema.parse(source);
+}
