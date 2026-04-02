@@ -1,4 +1,6 @@
--- App profile: one row per auth user. Used by apps/api (service role) and optional direct client access.
+-- App profile: one row per auth user.
+-- API uses the Supabase publishable key + the end-user JWT so RLS applies (auth.uid() = user_id).
+-- Service role bypasses RLS; use it only for break-glass tooling, not routine profile CRUD in apps/api.
 
 create table public.user_profiles (
     user_id uuid not null primary key references auth.users (id) on delete cascade,

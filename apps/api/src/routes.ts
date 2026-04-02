@@ -3,14 +3,14 @@ import type { AuthAdapter } from "@gloss-plus-one/shared/adapters/auth";
 import { createAuthRouter } from "./features/auth/router.js";
 import type { SignInService } from "./features/auth/sign-in.js";
 import { createUserProfileRouter } from "./features/user-profile/router.js";
-import type { UserProfileService } from "./features/user-profile/service.js";
+import type { UserProfileServiceForAccessToken } from "./features/user-profile/service-factory.js";
 import { createRequireAuthMiddleware } from "./middleware/require-auth.js";
 
 /** Wire HTTP only — no raw `Env` / secrets here (composition root passes built deps). */
 export type ApiRouterDeps = {
     authAdapter: AuthAdapter;
     signInService: SignInService;
-    userProfileService: UserProfileService;
+    userProfileServiceForAccessToken: UserProfileServiceForAccessToken;
     /** Public OAuth URLs for routes (not secrets). */
     oauthRoutesConfig: {
         googleOAuthRedirectTo: string;
@@ -19,7 +19,8 @@ export type ApiRouterDeps = {
 };
 
 export function createRoutes(deps: ApiRouterDeps): Router {
-    const { authAdapter, signInService, userProfileService, oauthRoutesConfig } = deps;
+    const { authAdapter, signInService, userProfileServiceForAccessToken, oauthRoutesConfig } =
+        deps;
     const requireAuth = createRequireAuthMiddleware(authAdapter);
 
     const router = Router();
@@ -30,7 +31,7 @@ export function createRoutes(deps: ApiRouterDeps): Router {
     router.use(
         "/user-profile",
         requireAuth,
-        createUserProfileRouter({ userProfileService }),
+        createUserProfileRouter({ userProfileServiceForAccessToken }),
     );
     return router;
 }

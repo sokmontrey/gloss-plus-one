@@ -8,7 +8,7 @@ import { createSupabaseAuthAdapter } from "./adapters/supabase-auth.js";
 import { createSignInService } from "./features/auth/sign-in.js";
 import { createUserProfileRepository } from "./features/user-profile/repository.js";
 import { createUserProfileService } from "./features/user-profile/service.js";
-import { createSupabaseAdminClient } from "./lib/supabase-admin.js";
+import { createSupabaseUserClient } from "./lib/supabase-user.js";
 import { createRoutes } from "./routes.js";
 import { createEnv } from "./env.js";
 import { logger, requestLogger, type RequestWithLogger } from "./logger.js";
@@ -20,15 +20,24 @@ const authAdapter = createSupabaseAuthAdapter({
     publishableKey: env.SUPABASE_PUBLISHABLE_KEY,
     serviceRoleKey: env.SUPABASE_SECRET_KEY,
 });
-const supabaseAdmin = createSupabaseAdminClient({
-    url: env.SUPABASE_URL,
-    serviceRoleKey: env.SUPABASE_SECRET_KEY,
+function userProfileServiceForAccessToken(accessToken: string) {
+    return createUserProfileService({
+        userProfileRepository: createUserProfileRepository({
+            supabaseClient: createSupabaseUserClient({
+                url: env.SUPABASE_URL,
+                publishableKey: env.SUPABASE_PUBLISHABLE_KEY,
+                accessToken,
+            }),
+        }),
+    });
+}
+
+const signInService = createSignInService({
+    authAdapter,
+    ensureProfileAfterSignIn: async (user, accessToken) => {
+        await userProfileServiceForAccessToken(accessToken).ensureProfileAfterSignIn(user);
+    },
 });
-const userProfileRepository = createUserProfileRepository({
-    supabaseClient: supabaseAdmin,
-});
-const userProfileService = createUserProfileService({ userProfileRepository });
-const signInService = createSignInService({ authAdapter, userProfileService });
 
 const app = express();
 
@@ -80,7 +89,7 @@ app.use(
     createRoutes({
         authAdapter,
         signInService,
-        userProfileService,
+        userProfileServiceForAccessToken,
         oauthRoutesConfig: {
             googleOAuthRedirectTo: env.GOOGLE_OAUTH_REDIRECT_TO,
             googleOAuthCallbackUrl: env.GOOGLE_OAUTH_CALLBACK_URL,

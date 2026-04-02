@@ -3,13 +3,10 @@ import type { Database } from "../database.types.js";
 
 /**
  * Supabase PostgREST client using the **service role** key (`SUPABASE_SECRET_KEY`).
- * Server-only: trusted API code (e.g. profile persistence). Not the anon/publishable key.
+ * Server-only, bypasses RLS. Optional: scripts, migrations, or future admin tooling —
+ * routine `user_profiles` access in apps/api uses {@link createSupabaseUserClient} + user JWT.
  *
- * Construct this only in the composition root (`src/index.ts`). Feature routers/services
- * receive a repository that already holds this client — they must not import this module.
- *
- * Auth (`exchangeCodeForSession`, `getUser`, admin sign-out) uses a separate client in
- * `adapters/supabase-auth.ts`, still server-only and still constructed at the composition root.
+ * Auth (`exchangeCodeForSession`, `getUser`, admin sign-out) is handled in `adapters/supabase-auth.ts`.
  */
 export type SupabaseAdminClient = ReturnType<typeof createClient<Database>>;
 

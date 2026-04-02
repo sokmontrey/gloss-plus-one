@@ -5,6 +5,8 @@ declare global {
     namespace Express {
         interface Request {
             user?: AuthUser;
+            /** Set when `Authorization: Bearer` succeeds; needed for RLS-scoped Supabase calls. */
+            authAccessToken?: string;
         }
     }
 }
@@ -29,6 +31,7 @@ export function createRequireAuthMiddleware(authAdapter: AuthAdapter) {
         }
 
         req.user = user;
+        req.authAccessToken = token;
         next();
     };
 }

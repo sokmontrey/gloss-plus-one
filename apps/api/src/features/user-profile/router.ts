@@ -1,28 +1,28 @@
 import { Router } from "express";
 import { ProfileNotFoundError } from "./repository.js";
-import {
-    type UserProfileService,
-    MissingUserEmailError,
-} from "./service.js";
+import { MissingUserEmailError } from "./service.js";
 import { updateProfileBodySchema } from "./schemas.js";
+import type { UserProfileServiceForAccessToken } from "./service-factory.js";
 
 export type UserProfileRouterDeps = {
-    userProfileService: UserProfileService;
+    userProfileServiceForAccessToken: UserProfileServiceForAccessToken;
 };
 
 export function createUserProfileRouter({
-    userProfileService,
+    userProfileServiceForAccessToken,
 }: UserProfileRouterDeps): Router {
     const router = Router();
 
     router.get("/", async (req, res, next) => {
         try {
             const user = req.user;
-            if (!user) {
+            const accessToken = req.authAccessToken;
+            if (!user || !accessToken) {
                 res.status(401).json({ error: "Unauthorized" });
                 return;
             }
 
+            const userProfileService = userProfileServiceForAccessToken(accessToken);
             const profile = await userProfileService.getProfile(user.id);
             if (!profile) {
                 res.status(404).json({ error: "Profile not found" });
@@ -38,11 +38,13 @@ export function createUserProfileRouter({
     router.put("/", async (req, res, next) => {
         try {
             const user = req.user;
-            if (!user) {
+            const accessToken = req.authAccessToken;
+            if (!user || !accessToken) {
                 res.status(401).json({ error: "Unauthorized" });
                 return;
             }
 
+            const userProfileService = userProfileServiceForAccessToken(accessToken);
             const parsed = updateProfileBodySchema.safeParse(req.body ?? {});
             if (!parsed.success) {
                 res.status(400).json({
@@ -80,11 +82,13 @@ export function createUserProfileRouter({
     router.delete("/", async (req, res, next) => {
         try {
             const user = req.user;
-            if (!user) {
+            const accessToken = req.authAccessToken;
+            if (!user || !accessToken) {
                 res.status(401).json({ error: "Unauthorized" });
                 return;
             }
 
+            const userProfileService = userProfileServiceForAccessToken(accessToken);
             await userProfileService.deleteProfile(user.id);
             res.status(204).send();
         } catch (err) {

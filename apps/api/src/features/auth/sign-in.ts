@@ -1,5 +1,4 @@
-import type { AuthAdapter, AuthSession } from "@gloss-plus-one/shared/adapters/auth";
-import type { UserProfileService } from "../user-profile/service.js";
+import type { AuthAdapter, AuthSession, AuthUser } from "@gloss-plus-one/shared/adapters/auth";
 
 /**
  * Orchestrates the auth adapter and user profile: one-way flow after OAuth.
@@ -7,17 +6,20 @@ import type { UserProfileService } from "../user-profile/service.js";
  */
 export type SignInServiceDeps = {
     authAdapter: AuthAdapter;
-    userProfileService: UserProfileService;
+    /**
+     * Must use a Supabase client scoped with `accessToken` (RLS) — not service role.
+     */
+    ensureProfileAfterSignIn: (user: AuthUser, accessToken: string) => Promise<void>;
 };
 
 export function createSignInService({
     authAdapter,
-    userProfileService,
+    ensureProfileAfterSignIn,
 }: SignInServiceDeps) {
     return {
         async completeGoogleOAuthAndEnsureProfile(code: string): Promise<AuthSession> {
             const session = await authAdapter.completeGoogleOAuth({ code });
-            await userProfileService.ensureProfileAfterSignIn(session.user);
+            await ensureProfileAfterSignIn(session.user, session.tokens.accessToken);
             return session;
         },
     };
