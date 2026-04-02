@@ -1,10 +1,13 @@
 import { Router } from "express";
 import { z } from "zod";
-import type { UserProfileRepository } from "@gloss-plus-one/shared/types/user-profile";
 import { ProfileNotFoundError } from "../../repositories/user-profile.js";
+import {
+    type UserProfileService,
+    MissingUserEmailError,
+} from "./service.js";
 
 export type UserProfileRoutesProps = {
-    userProfileRepository: UserProfileRepository;
+    userProfileService: UserProfileService;
 };
 
 const nullableString = z.union([z.string(), z.null()]);
@@ -23,7 +26,7 @@ const updateUserProfileBodySchema = z
 type UpdateUserProfileBody = z.infer<typeof updateUserProfileBodySchema>;
 
 export function createUserProfileRoutes({
-    userProfileRepository,
+    userProfileService,
 }: UserProfileRoutesProps): Router {
     const router = Router();
 
@@ -35,7 +38,7 @@ export function createUserProfileRoutes({
                 return;
             }
 
-            const profile = await userProfileRepository.getProfile(user.id);
+            const profile = await userProfileService.getProfile(user.id);
             if (!profile) {
                 res.status(404).json({ error: "Profile not found" });
                 return;
@@ -66,50 +69,24 @@ export function createUserProfileRoutes({
 
             const patch: UpdateUserProfileBody = parsed.data;
 
-            const existing = await userProfileRepository.getProfile(user.id);
-
-            if (existing) {
-                if (Object.keys(patch).length === 0) {
-                    res.json(existing);
+            try {
+                const result = await userProfileService.putProfile(user, patch);
+                if (result.outcome === "created") {
+                    res.status(201).json(result.profile);
                     return;
                 }
-
-                try {
-                    const updated = await userProfileRepository.updateProfile(
-                        user.id,
-                        patch,
-                    );
-                    res.json(updated);
-                } catch (err) {
-                    if (err instanceof ProfileNotFoundError) {
-                        res.status(404).json({ error: err.message });
-                        return;
-                    }
-                    throw err;
+                res.json(result.profile);
+            } catch (err) {
+                if (err instanceof MissingUserEmailError) {
+                    res.status(400).json({ error: err.message });
+                    return;
                 }
-                return;
+                if (err instanceof ProfileNotFoundError) {
+                    res.status(404).json({ error: err.message });
+                    return;
+                }
+                throw err;
             }
-
-            if (!user.email) {
-                res.status(400).json({ error: "Authenticated user has no email" });
-                return;
-            }
-
-            const created = await userProfileRepository.createProfile({
-                userId: user.id,
-                email: patch.email ?? user.email,
-                name: "name" in patch ? patch.name ?? undefined : user.name,
-                avatarUrl:
-                    "avatarUrl" in patch ? patch.avatarUrl ?? undefined : user.avatarUrl,
-                targetLanguage:
-                    "targetLanguage" in patch
-                        ? patch.targetLanguage ?? undefined
-                        : undefined,
-                proficiencyLevel: patch.proficiencyLevel ?? 0,
-                onboardingComplete: patch.onboardingComplete ?? false,
-            });
-
-            res.status(201).json(created);
         } catch (err) {
             next(err);
         }
@@ -123,7 +100,7 @@ export function createUserProfileRoutes({
                 return;
             }
 
-            await userProfileRepository.deleteProfile(user.id);
+            await userProfileService.deleteProfile(user.id);
             res.status(204).send();
         } catch (err) {
             next(err);
