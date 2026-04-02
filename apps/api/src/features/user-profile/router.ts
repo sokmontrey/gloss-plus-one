@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { ProfileNotFoundError } from "../../repositories/profile.js";
+import { ProfileNotFoundError } from "./repository.js";
 import {
     type UserProfileService,
     MissingUserEmailError,

@@ -4,8 +4,8 @@ import type {
     UserProfile,
     UserProfileRepository,
 } from "@gloss-plus-one/shared/types/user-profile";
-import type { Database } from "../database.types.js";
-import type { SupabaseClient } from "../lib/supabase.js";
+import type { Database } from "../../database.types.js";
+import type { SupabaseClient } from "../../lib/supabase.js";
 
 type UserProfileRow = Database["public"]["Tables"]["user_profiles"]["Row"];
 

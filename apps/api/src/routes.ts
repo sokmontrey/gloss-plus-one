@@ -5,7 +5,7 @@ import type { Env } from "./env.js";
 import { createSupabaseAuthAdapter } from "./adapters/supabase-auth.js";
 import { createUserProfileRouter } from "./features/user-profile/router.js";
 import { createUserProfileService } from "./features/user-profile/service.js";
-import { createUserProfileRepository } from "./repositories/profile.js";
+import { createUserProfileRepository } from "./features/user-profile/repository.js";
 import { createSupabaseClient } from "./lib/supabase.js";
 import { createRequireAuthMiddleware } from "./middleware/require-auth.js";
 
