@@ -1,0 +1,20 @@
+# Vite build output (CRXJS writes here)
+dist/
+
+# Vite dependency pre-bundling / cache (if created)
+.vite/
+
+# Turbo task output for this package (root .turbo also ignored)
+.turbo/
+
+# Local env (secrets); root .env* rules apply — listed for clarity in this app
+.env
+.env.local
+.env.*.local
+
+# Packaged / published extension artifacts and signing keys
+*.crx
+*.xpi
+*.zip
+*.pem
+*.key
