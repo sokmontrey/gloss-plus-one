@@ -10,6 +10,12 @@ import {
     type AuthAdapter,
 } from "@gloss-plus-one/shared/adapters/auth";
 import type { Env } from "../../env.js";
+import type { SignInService } from "./sign-in.js";
+import {
+    googleOAuthUrlBodySchema,
+    googleOAuthCallbackQuerySchema,
+    refreshSessionBodySchema,
+} from "./schemas.js";
 
 const OAUTH_STATE_COOKIE = "oauth_state";
 
@@ -35,27 +41,30 @@ function parseBearer(authorization: string | undefined): string | null {
     return token.length > 0 ? token : null;
 }
 
-function parsePrompt(
-    value: unknown,
-): GoogleOAuthPrompt | undefined {
-    if (value === "consent" || value === "select_account" || value === "none") {
-        return value;
-    }
-    return undefined;
-}
-
-type GoogleOAuthPrompt = "consent" | "select_account" | "none";
-
-export type AuthRoutesProps = {
+export type AuthRouterDeps = {
     authAdapter: AuthAdapter;
+    signInService: SignInService;
     env: Env;
-}
+};
 
-export function createAuthRoutes({ authAdapter, env }: AuthRoutesProps): Router {
+export function createAuthRouter({
+    authAdapter,
+    signInService,
+    env,
+}: AuthRouterDeps): Router {
     const router = Router();
 
     router.post("/google/url", async (req, res, next) => {
         try {
+            const parsed = googleOAuthUrlBodySchema.safeParse(req.body ?? {});
+            if (!parsed.success) {
+                res.status(400).json({
+                    error: "Invalid request body",
+                    details: parsed.error.flatten(),
+                });
+                return;
+            }
+
             const state = randomUUID();
 
             res.cookie(OAUTH_STATE_COOKIE, state, {
@@ -69,11 +78,8 @@ export function createAuthRoutes({ authAdapter, env }: AuthRoutesProps): Router 
             const url = await authAdapter.getGoogleOAuthUrl({
                 redirectTo: env.GOOGLE_OAUTH_REDIRECT_TO,
                 state,
-                prompt: parsePrompt(req.body?.prompt),
-                loginHint:
-                    typeof req.body?.loginHint === "string"
-                        ? req.body.loginHint
-                        : undefined,
+                prompt: parsed.data.prompt,
+                loginHint: parsed.data.loginHint,
             });
             res.json({ url });
         } catch (err) {
@@ -83,16 +89,16 @@ export function createAuthRoutes({ authAdapter, env }: AuthRoutesProps): Router 
 
     router.get("/google/callback", async (req, res, next) => {
         try {
-            const code = req.query.code;
-            const state = req.query.state;
-            if (typeof code !== "string" || code.length === 0) {
-                res.status(400).json({ error: "code query parameter is required" });
+            const parsed = googleOAuthCallbackQuerySchema.safeParse(req.query);
+            if (!parsed.success) {
+                res.status(400).json({
+                    error: "Invalid callback query",
+                    details: parsed.error.flatten(),
+                });
                 return;
             }
-            if (typeof state !== "string" || state.length === 0) {
-                res.status(400).json({ error: "state query parameter is required" });
-                return;
-            }
+
+            const { code, state } = parsed.data;
 
             const cookieState = req.cookies?.[OAUTH_STATE_COOKIE];
             res.clearCookie(OAUTH_STATE_COOKIE, { path: "/api/auth/google/callback" });
@@ -102,7 +108,7 @@ export function createAuthRoutes({ authAdapter, env }: AuthRoutesProps): Router 
                 return;
             }
 
-            const session = await authAdapter.completeGoogleOAuth({ code });
+            const session = await signInService.completeGoogleOAuthAndEnsureProfile(code);
             const params = new URLSearchParams({
                 access_token: session.tokens.accessToken,
                 refresh_token: session.tokens.refreshToken,
@@ -116,13 +122,16 @@ export function createAuthRoutes({ authAdapter, env }: AuthRoutesProps): Router 
 
     router.post("/refresh", async (req, res, next) => {
         try {
-            const refreshToken = req.body?.refreshToken;
-            if (typeof refreshToken !== "string" || refreshToken.length === 0) {
-                res.status(400).json({ error: "refreshToken is required" });
+            const parsed = refreshSessionBodySchema.safeParse(req.body ?? {});
+            if (!parsed.success) {
+                res.status(400).json({
+                    error: "Invalid request body",
+                    details: parsed.error.flatten(),
+                });
                 return;
             }
 
-            const session = await authAdapter.refreshSession(refreshToken);
+            const session = await authAdapter.refreshSession(parsed.data.refreshToken);
             if (!session) {
                 res.status(401).json({ error: "invalid or expired refresh token" });
                 return;

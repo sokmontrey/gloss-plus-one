@@ -1,5 +1,6 @@
 import type { AuthUser } from "@gloss-plus-one/shared/adapters/auth";
 import type {
+    CreateUserProfile,
     UpdateUserProfile,
     UserProfile,
     UserProfileRepository,
@@ -18,16 +19,48 @@ export type PutUserProfileResult =
     | { outcome: "updated"; profile: UserProfile }
     | { outcome: "unchanged"; profile: UserProfile };
 
-export type UserProfileServiceProps = {
+export type UserProfileServiceDeps = {
     userProfileRepository: UserProfileRepository;
 };
 
+function createPayloadFromAuthUser(user: AuthUser): CreateUserProfile {
+    return {
+        userId: user.id,
+        email: user.email,
+        name: user.name,
+        avatarUrl: user.avatarUrl,
+        targetLanguage: undefined,
+        proficiencyLevel: 0,
+        onboardingComplete: false,
+    };
+}
+
 export function createUserProfileService({
     userProfileRepository,
-}: UserProfileServiceProps) {
+}: UserProfileServiceDeps) {
     return {
         async getProfile(userId: string): Promise<UserProfile | null> {
             return userProfileRepository.getProfile(userId);
+        },
+
+        /**
+         * Idempotent: creates a row after OAuth if missing. Safe on every login.
+         */
+        async ensureProfileAfterSignIn(user: AuthUser): Promise<UserProfile> {
+            const existing = await userProfileRepository.getProfile(user.id);
+            if (existing) return existing;
+
+            if (!user.email?.trim()) {
+                throw new MissingUserEmailError();
+            }
+
+            try {
+                return await userProfileRepository.createProfile(createPayloadFromAuthUser(user));
+            } catch (err) {
+                const retry = await userProfileRepository.getProfile(user.id);
+                if (retry) return retry;
+                throw err;
+            }
         },
 
         async putProfile(
@@ -48,22 +81,23 @@ export function createUserProfileService({
                 return { outcome: "updated", profile: updated };
             }
 
-            if (!user.email) {
+            if (!user.email?.trim()) {
                 throw new MissingUserEmailError();
             }
 
+            const base = createPayloadFromAuthUser(user);
             const created = await userProfileRepository.createProfile({
-                userId: user.id,
-                email: patch.email ?? user.email,
-                name: "name" in patch ? patch.name ?? undefined : user.name,
+                ...base,
+                email: patch.email ?? base.email,
+                name: "name" in patch ? patch.name ?? undefined : base.name,
                 avatarUrl:
-                    "avatarUrl" in patch ? patch.avatarUrl ?? undefined : user.avatarUrl,
+                    "avatarUrl" in patch ? patch.avatarUrl ?? undefined : base.avatarUrl,
                 targetLanguage:
                     "targetLanguage" in patch
                         ? patch.targetLanguage ?? undefined
-                        : undefined,
-                proficiencyLevel: patch.proficiencyLevel ?? 0,
-                onboardingComplete: patch.onboardingComplete ?? false,
+                        : base.targetLanguage,
+                proficiencyLevel: patch.proficiencyLevel ?? base.proficiencyLevel,
+                onboardingComplete: patch.onboardingComplete ?? base.onboardingComplete,
             });
 
             return { outcome: "created", profile: created };

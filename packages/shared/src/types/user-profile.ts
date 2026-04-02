@@ -1,3 +1,4 @@
+/** Domain model: persisted user profile. API validates HTTP bodies with Zod in apps/api features. */
 export interface UserProfile {
     userId: string
     email: string

@@ -23,32 +23,21 @@ function mapRow(row: UserProfileRow): UserProfile {
     };
 }
 
-function repoError(message: string, cause?: unknown): Error {
-    const err = new Error(message);
-    if (cause !== undefined) {
-        (err as Error & { cause?: unknown }).cause = cause;
-    }
-    return err;
-}
-
 export class ProfileNotFoundError extends Error {
     override readonly name = "ProfileNotFoundError";
 
     constructor(cause?: unknown) {
-        super("Profile not found");
-        if (cause !== undefined) {
-            (this as Error & { cause?: unknown }).cause = cause;
-        }
+        super("Profile not found", { cause });
     }
 }
 
-export type UserProfileRepositoryProps = {
+export type ProfileRepositoryDeps = {
     supabaseClient: SupabaseClient;
 };
 
 export function createUserProfileRepository({
     supabaseClient,
-}: UserProfileRepositoryProps): UserProfileRepository {
+}: ProfileRepositoryDeps): UserProfileRepository {
     return {
         async getProfile(userId: string): Promise<UserProfile | null> {
             const { data, error } = await supabaseClient
@@ -58,7 +47,7 @@ export function createUserProfileRepository({
                 .maybeSingle();
 
             if (error) {
-                throw repoError("Failed to load user profile", error);
+                throw new Error("Failed to load user profile", { cause: error });
             }
 
             if (!data) return null;
@@ -66,7 +55,6 @@ export function createUserProfileRepository({
         },
 
         async createProfile(profile: CreateUserProfile): Promise<UserProfile> {
-            const now = new Date().toISOString();
             const row: Database["public"]["Tables"]["user_profiles"]["Insert"] = {
                 user_id: profile.userId,
                 email: profile.email,
@@ -75,8 +63,6 @@ export function createUserProfileRepository({
                 target_language: profile.targetLanguage ?? null,
                 proficiency_level: profile.proficiencyLevel,
                 onboarding_complete: profile.onboardingComplete,
-                created_at: now,
-                updated_at: now,
             };
 
             const { data, error } = await supabaseClient
@@ -86,7 +72,7 @@ export function createUserProfileRepository({
                 .single();
 
             if (error) {
-                throw repoError("Failed to create user profile", error);
+                throw new Error("Failed to create user profile", { cause: error });
             }
 
             return mapRow(data);
@@ -127,7 +113,7 @@ export function createUserProfileRepository({
                 if (error.code === "PGRST116") {
                     throw new ProfileNotFoundError(error);
                 }
-                throw repoError("Failed to update user profile", error);
+                throw new Error("Failed to update user profile", { cause: error });
             }
 
             return mapRow(data);
@@ -140,7 +126,7 @@ export function createUserProfileRepository({
                 .eq("user_id", userId);
 
             if (error) {
-                throw repoError("Failed to delete user profile", error);
+                throw new Error("Failed to delete user profile", { cause: error });
             }
         },
     };

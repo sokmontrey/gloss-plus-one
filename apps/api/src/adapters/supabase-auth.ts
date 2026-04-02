@@ -122,7 +122,7 @@ function toAuthSession(session: Session, user: User) {
             ? session.expires_at
             : typeof session.expires_in === "number" && session.expires_in > 0
             ? now + session.expires_in
-            : now + 3600; // 1hr fallback, Supabase default
+            : now + 3600;
 
     return {
         user: toAuthUser(user),

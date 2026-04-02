@@ -1,33 +1,18 @@
 import { Router } from "express";
-import { z } from "zod";
-import { ProfileNotFoundError } from "../../repositories/user-profile.js";
+import { ProfileNotFoundError } from "../../repositories/profile.js";
 import {
     type UserProfileService,
     MissingUserEmailError,
 } from "./service.js";
+import { updateProfileBodySchema } from "./schemas.js";
 
-export type UserProfileRoutesProps = {
+export type UserProfileRouterDeps = {
     userProfileService: UserProfileService;
 };
 
-const nullableString = z.union([z.string(), z.null()]);
-
-const updateUserProfileBodySchema = z
-    .object({
-        email: z.string().email().optional(),
-        name: nullableString.optional(),
-        avatarUrl: nullableString.optional(),
-        targetLanguage: nullableString.optional(),
-        proficiencyLevel: z.number().int().optional(),
-        onboardingComplete: z.boolean().optional(),
-    })
-    .strict();
-
-type UpdateUserProfileBody = z.infer<typeof updateUserProfileBodySchema>;
-
-export function createUserProfileRoutes({
+export function createUserProfileRouter({
     userProfileService,
-}: UserProfileRoutesProps): Router {
+}: UserProfileRouterDeps): Router {
     const router = Router();
 
     router.get("/", async (req, res, next) => {
@@ -58,7 +43,7 @@ export function createUserProfileRoutes({
                 return;
             }
 
-            const parsed = updateUserProfileBodySchema.safeParse(req.body ?? {});
+            const parsed = updateProfileBodySchema.safeParse(req.body ?? {});
             if (!parsed.success) {
                 res.status(400).json({
                     error: "Invalid request body",
@@ -67,7 +52,7 @@ export function createUserProfileRoutes({
                 return;
             }
 
-            const patch: UpdateUserProfileBody = parsed.data;
+            const patch = parsed.data;
 
             try {
                 const result = await userProfileService.putProfile(user, patch);
