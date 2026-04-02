@@ -1,4 +1,13 @@
+import { config as loadEnv } from "dotenv";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { z } from "zod";
+
+const envDir = dirname(fileURLToPath(import.meta.url));
+const repoRoot = join(envDir, "..", "..", "..");
+const apiPackageRoot = join(envDir, "..");
+loadEnv({ path: join(repoRoot, ".env") });
+loadEnv({ path: join(apiPackageRoot, ".env") });
 
 const envSchema = z.object({
     SB_AUTH_GOOGLE_CLIENT_ID: z.string().min(1),
