@@ -4,8 +4,8 @@ import { fileURLToPath } from "node:url";
 import { z } from "zod";
 
 const envDir = dirname(fileURLToPath(import.meta.url));
-/** Monorepo root (…/apps/api/src → up to package root → up to repo root). */
-const repoRoot = join(envDir, "..", "..");
+/** Monorepo root: `envDir` is …/apps/api/src or …/apps/api/dist — three parents → repo root. */
+const repoRoot = join(envDir, "..", "..", "..");
 const apiPackageRoot = join(envDir, "..");
 loadEnv({ path: join(repoRoot, ".env") });
 loadEnv({ path: join(apiPackageRoot, ".env") });
