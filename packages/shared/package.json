@@ -17,6 +17,10 @@
         "./adapters/auth": {
             "types": "./dist/adapters/auth.d.ts",
             "import": "./dist/adapters/auth.js"
+        },
+        "./types/user-profile": {
+            "types": "./dist/types/user-profile.d.ts",
+            "import": "./dist/types/user-profile.js"
         }
     },
     "files": ["dist"],

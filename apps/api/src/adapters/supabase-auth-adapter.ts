@@ -57,11 +57,15 @@ export function createSupabaseAuthAdapter(env: Env): AuthAdapter {
                 data: { user },
                 error,
             } = await supabase.auth.getUser(accessToken);
-            if (!user?.email) {
-                console.warn('Verified user missing email', { userId: user?.id })
-                return null
+
+            if (error) {
+                return null;
             }
-            if (error) return null;
+
+            if (!user?.email) {
+                return null;
+            }
+
             return toAuthUser(user);
         },
 
