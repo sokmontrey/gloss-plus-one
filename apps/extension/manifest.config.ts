@@ -12,11 +12,8 @@ export default defineManifest({
         service_worker: "src/background.ts",
         type: "module",
     },
-    web_accessible_resources: [
-        {
-            matches: ["<all_urls>"],
-            resources: ["**/*", "*"],
-            use_dynamic_url: false,
-        },
-    ],
+    // Do not list broad globs here: Chrome MV3 rejects patterns like `**/*` and bare `*`, and
+    // @crxjs/vite-plugin merges its own `web_accessible_resources` — duplicating broad rules
+    // yields two identical blocks and load errors. Add explicit paths only when you need a
+    // page script to load extension files, e.g. `resources: ["assets/injected.js"]`.
 });
