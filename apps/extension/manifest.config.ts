@@ -8,4 +8,15 @@ export default defineManifest({
         default_title: "Gloss Plus One",
         default_popup: "src/popup/index.html",
     },
+    background: {
+        service_worker: "src/background.ts",
+        type: "module",
+    },
+    web_accessible_resources: [
+        {
+            matches: ["<all_urls>"],
+            resources: ["**/*", "*"],
+            use_dynamic_url: false,
+        },
+    ],
 });

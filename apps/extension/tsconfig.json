@@ -10,6 +10,9 @@
         "noEmit": true,
         "isolatedModules": true,
         "resolveJsonModule": true,
+        "baseUrl": ".",
+        "paths": { "@/*": ["src/*"] },
+        "ignoreDeprecations": "6.0",
         "types": ["chrome", "vite/client"]
     },
     "include": ["src/**/*.ts", "src/**/*.tsx", "vite.config.ts", "manifest.config.ts"]
