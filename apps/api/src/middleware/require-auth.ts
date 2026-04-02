@@ -9,21 +9,23 @@ declare global {
     }
 }
 
-export function createRequireAuthMiddleware(auth: AuthAdapter) {
+const UNAUTHORIZED = { error: "Unauthorized" } as const;
+
+export function createRequireAuthMiddleware(authAdapter: AuthAdapter) {
     return async (req: Request, res: Response, next: NextFunction) => {
         const header = req.headers.authorization;
         if (!header?.startsWith("Bearer ")) {
-            return res.status(401).json({ error: "Missing token" });
+            return res.status(401).json(UNAUTHORIZED);
         }
 
         const token = header.slice(7).trim();
         if (!token) {
-            return res.status(401).json({ error: "Missing token" });
+            return res.status(401).json(UNAUTHORIZED);
         }
 
-        const user = await auth.verifyAccessToken(token);
+        const user = await authAdapter.verifyAccessToken(token);
         if (!user) {
-            return res.status(401).json({ error: "Invalid or expired token" });
+            return res.status(401).json(UNAUTHORIZED);
         }
 
         req.user = user;

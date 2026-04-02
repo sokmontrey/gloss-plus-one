@@ -1,3 +1,4 @@
+import type { SupabaseClient } from "@supabase/supabase-js";
 import type {
     CreateUserProfile,
     UpdateUserProfile,
@@ -5,7 +6,6 @@ import type {
     UserProfileRepository,
 } from "@gloss-plus-one/shared/types/user-profile";
 import type { Database } from "../../database.types.js";
-import type { SupabaseClient } from "../../lib/supabase.js";
 
 type UserProfileRow = Database["public"]["Tables"]["user_profiles"]["Row"];
 
@@ -32,7 +32,7 @@ export class ProfileNotFoundError extends Error {
 }
 
 export type ProfileRepositoryDeps = {
-    supabaseClient: SupabaseClient;
+    supabaseClient: SupabaseClient<Database>;
 };
 
 export function createUserProfileRepository({

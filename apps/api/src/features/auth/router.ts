@@ -1,5 +1,6 @@
 import {
     Router,
+    type CookieOptions,
     type NextFunction,
     type Request,
     type Response,
@@ -9,7 +10,6 @@ import {
     AuthError,
     type AuthAdapter,
 } from "@gloss-plus-one/shared/adapters/auth";
-import type { Env } from "../../env.js";
 import type { SignInService } from "./sign-in.js";
 import {
     googleOAuthUrlBodySchema,
@@ -18,6 +18,17 @@ import {
 } from "./schemas.js";
 
 const OAUTH_STATE_COOKIE = "oauth_state";
+const OAUTH_STATE_COOKIE_PATH = "/api/auth/google/callback";
+
+function oauthStateCookieOptions(): CookieOptions {
+    return {
+        httpOnly: true,
+        sameSite: "lax",
+        secure: process.env.NODE_ENV === "production",
+        path: OAUTH_STATE_COOKIE_PATH,
+        maxAge: 10 * 60 * 1000,
+    };
+}
 
 function authErrorStatus(code: AuthError["code"]): number {
     switch (code) {
@@ -44,13 +55,16 @@ function parseBearer(authorization: string | undefined): string | null {
 export type AuthRouterDeps = {
     authAdapter: AuthAdapter;
     signInService: SignInService;
-    env: Env;
+    oauthRoutesConfig: {
+        googleOAuthRedirectTo: string;
+        googleOAuthCallbackUrl: string;
+    };
 };
 
 export function createAuthRouter({
     authAdapter,
     signInService,
-    env,
+    oauthRoutesConfig,
 }: AuthRouterDeps): Router {
     const router = Router();
 
@@ -67,16 +81,10 @@ export function createAuthRouter({
 
             const state = randomUUID();
 
-            res.cookie(OAUTH_STATE_COOKIE, state, {
-                httpOnly: true,
-                sameSite: "lax",
-                secure: process.env.NODE_ENV === "production",
-                path: "/api/auth/google/callback",
-                maxAge: 10 * 60 * 1000,
-            });
+            res.cookie(OAUTH_STATE_COOKIE, state, oauthStateCookieOptions());
 
             const url = await authAdapter.getGoogleOAuthUrl({
-                redirectTo: env.GOOGLE_OAUTH_REDIRECT_TO,
+                redirectTo: oauthRoutesConfig.googleOAuthRedirectTo,
                 state,
                 prompt: parsed.data.prompt,
                 loginHint: parsed.data.loginHint,
@@ -101,7 +109,14 @@ export function createAuthRouter({
             const { code, state } = parsed.data;
 
             const cookieState = req.cookies?.[OAUTH_STATE_COOKIE];
-            res.clearCookie(OAUTH_STATE_COOKIE, { path: "/api/auth/google/callback" });
+            const clearStateCookie = () =>
+                res.clearCookie(OAUTH_STATE_COOKIE, {
+                    path: OAUTH_STATE_COOKIE_PATH,
+                    httpOnly: true,
+                    sameSite: "lax",
+                    secure: process.env.NODE_ENV === "production",
+                });
+            clearStateCookie();
 
             if (typeof cookieState !== "string" || cookieState !== state) {
                 next(new AuthError("OAUTH_FAILED", "Invalid OAuth state"));
@@ -114,7 +129,7 @@ export function createAuthRouter({
                 refresh_token: session.tokens.refreshToken,
                 expires_at: String(session.tokens.expiresAt),
             });
-            res.redirect(`${env.GOOGLE_OAUTH_CALLBACK_URL}#${params}`);
+            res.redirect(`${oauthRoutesConfig.googleOAuthCallbackUrl}#${params}`);
         } catch (err) {
             next(err);
         }
@@ -133,9 +148,11 @@ export function createAuthRouter({
 
             const session = await authAdapter.refreshSession(parsed.data.refreshToken);
             if (!session) {
-                res.status(401).json({ error: "invalid or expired refresh token" });
+                res.status(401).json({ error: "Unauthorized" });
                 return;
             }
+            res.setHeader("Cache-Control", "no-store");
+            res.setHeader("Pragma", "no-cache");
             res.json(session);
         } catch (err) {
             next(err);
@@ -146,13 +163,13 @@ export function createAuthRouter({
         try {
             const token = parseBearer(req.headers.authorization);
             if (!token) {
-                res.status(401).json({ error: "missing or invalid Authorization header" });
+                res.status(401).json({ error: "Unauthorized" });
                 return;
             }
 
             const user = await authAdapter.verifyAccessToken(token);
             if (!user) {
-                res.status(401).json({ error: "invalid or expired access token" });
+                res.status(401).json({ error: "Unauthorized" });
                 return;
             }
             res.json({ user });

@@ -1,9 +1,32 @@
 import { createClient, type Session, type User } from "@supabase/supabase-js";
 import { AuthError, type AuthAdapter } from "@gloss-plus-one/shared/adapters/auth";
-import type { Env } from "../env.js";
 
-export function createSupabaseAuthAdapter(env: Env): AuthAdapter {
-    const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SECRET_KEY, {
+export type SupabaseAuthAdapterConfig = {
+    url: string;
+    /** Anon (publishable) key: OAuth, `getUser`, refresh — does not bypass RLS. */
+    publishableKey: string;
+    /** Service role: used only for `auth.admin.signOut` in `revokeSession`. */
+    serviceRoleKey: string;
+};
+
+/**
+ * Supabase Auth for the API. Routine token verification uses the publishable key;
+ * a separate admin client is used only for server-side session revocation.
+ */
+export function createSupabaseAuthAdapter({
+    url,
+    publishableKey,
+    serviceRoleKey,
+}: SupabaseAuthAdapterConfig): AuthAdapter {
+    const supabase = createClient(url, publishableKey, {
+        auth: {
+            autoRefreshToken: false,
+            detectSessionInUrl: false,
+            persistSession: false,
+        },
+    });
+
+    const supabaseAdmin = createClient(url, serviceRoleKey, {
         auth: {
             autoRefreshToken: false,
             detectSessionInUrl: false,
@@ -95,7 +118,7 @@ export function createSupabaseAuthAdapter(env: Env): AuthAdapter {
 
         async revokeSession(accessToken: string) {
             try {
-                await supabase.auth.admin.signOut(accessToken);
+                await supabaseAdmin.auth.admin.signOut(accessToken);
             } catch {
                 // Best-effort per adapter contract.
             }

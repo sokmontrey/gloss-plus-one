@@ -157,3 +157,7 @@ dist
 # End of https://www.toptal.com/developers/gitignore/api/turbo,node
 
 .pnpm-store
+
+# Tooling artifacts (do not commit)
+typecheck.log
+vite.config.ts.timestamp-*

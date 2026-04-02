@@ -4,7 +4,8 @@ import { fileURLToPath } from "node:url";
 import { z } from "zod";
 
 const envDir = dirname(fileURLToPath(import.meta.url));
-const repoRoot = join(envDir, "..", "..", "..");
+/** Monorepo root (…/apps/api/src → up to package root → up to repo root). */
+const repoRoot = join(envDir, "..", "..");
 const apiPackageRoot = join(envDir, "..");
 loadEnv({ path: join(repoRoot, ".env") });
 loadEnv({ path: join(apiPackageRoot, ".env") });
@@ -22,7 +23,16 @@ const envSchema = z.object({
                 .split(",")
                 .map((o) => o.trim())
                 .filter(Boolean),
-        ),
+        )
+        .superRefine((origins, ctx) => {
+            if (origins.some((o) => o === "*" || o.includes("*"))) {
+                ctx.addIssue({
+                    code: z.ZodIssueCode.custom,
+                    message:
+                        "CORS_ORIGINS must list explicit origins only (no *). For a browser extension use chrome-extension://<extension-id>.",
+                });
+            }
+        }),
     SUPABASE_URL: z.string().url(),
     SUPABASE_PUBLISHABLE_KEY: z.string().min(1),
     SUPABASE_SECRET_KEY: z.string().min(1),

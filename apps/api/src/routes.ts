@@ -1,27 +1,31 @@
 import { Router } from "express";
+import type { AuthAdapter } from "@gloss-plus-one/shared/adapters/auth";
 import { createAuthRouter } from "./features/auth/router.js";
-import { createSignInService } from "./features/auth/sign-in.js";
-import type { Env } from "./env.js";
-import { createSupabaseAuthAdapter } from "./adapters/supabase-auth.js";
+import type { SignInService } from "./features/auth/sign-in.js";
 import { createUserProfileRouter } from "./features/user-profile/router.js";
-import { createUserProfileService } from "./features/user-profile/service.js";
-import { createUserProfileRepository } from "./features/user-profile/repository.js";
-import { createSupabaseClient } from "./lib/supabase.js";
+import type { UserProfileService } from "./features/user-profile/service.js";
 import { createRequireAuthMiddleware } from "./middleware/require-auth.js";
 
-export function createRoutes(env: Env) {
-    const authAdapter = createSupabaseAuthAdapter(env);
-    const requireAuth = createRequireAuthMiddleware(authAdapter);
+/** Wire HTTP only — no raw `Env` / secrets here (composition root passes built deps). */
+export type ApiRouterDeps = {
+    authAdapter: AuthAdapter;
+    signInService: SignInService;
+    userProfileService: UserProfileService;
+    /** Public OAuth URLs for routes (not secrets). */
+    oauthRoutesConfig: {
+        googleOAuthRedirectTo: string;
+        googleOAuthCallbackUrl: string;
+    };
+};
 
-    const supabaseClient = createSupabaseClient(env);
-    const userProfileRepository = createUserProfileRepository({ supabaseClient });
-    const userProfileService = createUserProfileService({ userProfileRepository });
-    const signInService = createSignInService({ authAdapter, userProfileService });
+export function createRoutes(deps: ApiRouterDeps): Router {
+    const { authAdapter, signInService, userProfileService, oauthRoutesConfig } = deps;
+    const requireAuth = createRequireAuthMiddleware(authAdapter);
 
     const router = Router();
     router.use(
         "/auth",
-        createAuthRouter({ authAdapter, signInService, env }),
+        createAuthRouter({ authAdapter, signInService, oauthRoutesConfig }),
     );
     router.use(
         "/user-profile",
