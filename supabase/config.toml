@@ -150,7 +150,13 @@ enabled = true
 # Vite default dev server; must match Redirect URLs / Site URL in Auth settings.
 site_url = "http://127.0.0.1:5173"
 # A list of *exact* URLs that auth providers are permitted to redirect to post authentication.
-additional_redirect_urls = ["http://localhost:5173", "http://127.0.0.1:5173"]
+additional_redirect_urls = [
+  "http://localhost:5173",
+  "http://127.0.0.1:5173",
+  "https://haiphfjhlibbnincejegfachfidmnaao.chromiumapp.org/"
+  # Chrome extension dev — replace <EXT_ID> with the ID from chrome://extensions
+  # "https://<EXT_ID>.chromiumapp.org/",
+]
 # How long tokens are valid for, in seconds. Defaults to 3600 (1 hour), maximum 604,800 (1 week).
 jwt_expiry = 3600
 # JWT issuer URL. If not set, defaults to the local API URL (http://127.0.0.1:<port>/auth/v1).
@@ -316,7 +322,7 @@ email_optional = false
 
 # Local Google OAuth: set enabled = true and add client id/secret to root .env (see .env.example).
 [auth.external.google]
-enabled = false
+enabled = true
 client_id = "env(SUPABASE_AUTH_EXTERNAL_GOOGLE_CLIENT_ID)"
 secret = "env(SUPABASE_AUTH_EXTERNAL_GOOGLE_SECRET)"
 redirect_uri = ""

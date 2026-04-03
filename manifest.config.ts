@@ -13,7 +13,7 @@ export default defineManifest({
     service_worker: 'src/background.ts',
     type: 'module',
   },
-  permissions: ['storage'],
+  permissions: ['storage', 'identity'],
   host_permissions: ['http://*/*', 'https://*/*'],
   content_scripts: [
     {

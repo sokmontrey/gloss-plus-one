@@ -1,17 +1,16 @@
-import { useEffect, useState } from 'react'
 import { Badge } from '@/components/badge'
 import { Button } from '@/components/ui/button'
-import { getSupabase } from './lib/supabase'
+import { Spinner } from '@/components/spinner'
+import { GoogleSignInButton } from '@/components/GoogleSignInButton'
+import { useAuth } from '@/hooks/useAuth'
+import { signOut } from '@/lib/auth'
+import { getSupabase } from '@/lib/supabase'
 
 type AppProps = { variant?: 'popup' | 'content' }
 
 export default function App({ variant = 'popup' }: AppProps) {
-  const [ready, setReady] = useState(false)
-
-  useEffect(() => {
-    const sb = getSupabase()
-    setReady(Boolean(sb))
-  }, [])
+  const { user, loading } = useAuth()
+  const configured = Boolean(getSupabase())
 
   return (
     <div
@@ -23,35 +22,35 @@ export default function App({ variant = 'popup' }: AppProps) {
     >
       <div className="flex flex-wrap items-center gap-2">
         <h1 className="font-heading text-base font-semibold tracking-tight">Gloss+1</h1>
-        <Badge variant="secondary" size="sm">
-          Beta
-        </Badge>
+        <Badge variant="secondary" size="sm">Beta</Badge>
       </div>
 
-      {variant === 'content' ? (
-        <p className="text-muted-foreground text-xs leading-relaxed">
-          Content script mount (dev placeholder)
+      {!configured ? (
+        <p className="text-xs text-muted-foreground">
+          Set <code>VITE_SUPABASE_URL</code> and <code>VITE_SUPABASE_PUBLISHABLE_KEY</code> to continue.
         </p>
-      ) : null}
-
-      <p className="text-sm">
-        <span className="text-muted-foreground">Supabase: </span>
-        {ready ? (
-          <Badge variant="green" className="align-middle">
-            client configured
-          </Badge>
+      ) : loading ? (
+        <div className="flex justify-center py-1">
+          <Spinner size="sm" className="text-muted-foreground" />
+        </div>
+      ) : variant === 'popup' && (
+        user ? (
+          <div className="space-y-3">
+            <p className="truncate text-sm text-muted-foreground">{user.email}</p>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="w-full"
+              onClick={() => signOut()}
+            >
+              Sign out
+            </Button>
+          </div>
         ) : (
-          <Badge variant="amber" className="align-middle">
-            set env keys
-          </Badge>
-        )}
-      </p>
-
-      {variant === 'popup' ? (
-        <Button type="button" variant="outline" size="sm" className="w-full">
-          Open settings (soon)
-        </Button>
-      ) : null}
+          <GoogleSignInButton />
+        )
+      )}
     </div>
   )
 }
