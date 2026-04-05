@@ -35,49 +35,11 @@ const BLOCK_TAGS = new Set([
 ])
 
 export function extractPageText(root: Element = document.body): ExtractionResult {
-  const blocks: TextBlock[] = []
-  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
-    acceptNode(node) {
-      if (!(node instanceof Text)) return NodeFilter.FILTER_REJECT
+  const blocks = discoverBlockElements(root)
+    .map((block) => extractBlockText(block, root))
+    .filter((block): block is TextBlock => block !== null)
 
-      const text = normalizeWhitespace(node.textContent ?? '')
-      if (!text) return NodeFilter.FILTER_REJECT
-
-      const parent = node.parentElement
-      if (!parent || isIgnoredNode(parent, root)) return NodeFilter.FILTER_REJECT
-
-      return NodeFilter.FILTER_ACCEPT
-    },
-  })
-
-  let currentBlock: TextBlock | null = null
-  let currentElement: Element | null = null
-  let totalChars = 0
-
-  while (walker.nextNode()) {
-    const node = walker.currentNode
-    if (!(node instanceof Text) || !node.parentElement) continue
-
-    const text = normalizeWhitespace(node.textContent ?? '')
-    if (!text) continue
-
-    const blockElement = getBlockAncestor(node.parentElement, root)
-    const path = getElementPath(blockElement, root)
-
-    if (currentBlock && currentElement === blockElement) {
-      currentBlock.text = `${currentBlock.text} ${text}`
-    } else {
-      currentBlock = {
-        text,
-        tagName: blockElement.tagName,
-        path,
-      }
-      currentElement = blockElement
-      blocks.push(currentBlock)
-    }
-
-    totalChars += text.length
-  }
+  const totalChars = blocks.reduce((count, block) => count + block.text.length, 0)
 
   return {
     url: window.location.href,
@@ -89,6 +51,75 @@ export function extractPageText(root: Element = document.body): ExtractionResult
       totalChars,
     },
   }
+}
+
+export function discoverBlockElements(root: Element): Element[] {
+  const blocks: Element[] = []
+  const seen = new Set<Element>()
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+    acceptNode(node) {
+      return acceptsTextNode(node, root)
+        ? NodeFilter.FILTER_ACCEPT
+        : NodeFilter.FILTER_REJECT
+    },
+  })
+
+  while (walker.nextNode()) {
+    const node = walker.currentNode
+    if (!(node instanceof Text) || !node.parentElement) continue
+
+    const block = getBlockAncestor(node.parentElement, root)
+    if (seen.has(block)) continue
+
+    seen.add(block)
+    blocks.push(block)
+  }
+
+  return blocks
+}
+
+export function extractBlockText(block: Element, root: Element): TextBlock | null {
+  const fragments: string[] = []
+  const walker = document.createTreeWalker(block, NodeFilter.SHOW_TEXT, {
+    acceptNode(node) {
+      if (!acceptsTextNode(node, root)) return NodeFilter.FILTER_REJECT
+      if (!(node instanceof Text) || !node.parentElement) return NodeFilter.FILTER_REJECT
+
+      return getBlockAncestor(node.parentElement, root) === block
+        ? NodeFilter.FILTER_ACCEPT
+        : NodeFilter.FILTER_REJECT
+    },
+  })
+
+  while (walker.nextNode()) {
+    const node = walker.currentNode
+    if (!(node instanceof Text)) continue
+
+    const text = normalizeWhitespace(node.textContent ?? '')
+    if (text) {
+      fragments.push(text)
+    }
+  }
+
+  if (fragments.length === 0) return null
+
+  return {
+    text: fragments.join(' '),
+    tagName: block.tagName,
+    path: getElementPath(block, root),
+  }
+}
+
+function acceptsTextNode(node: Node, root: Element): boolean {
+  if (!(node instanceof Text)) return false
+
+  const text = normalizeWhitespace(node.textContent ?? '')
+  if (!text) return false
+
+  const parent = node.parentElement
+  if (!parent || isIgnoredNode(parent, root)) return false
+
+  return true
 }
 
 function normalizeWhitespace(text: string): string {

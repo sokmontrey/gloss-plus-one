@@ -14,3 +14,21 @@ export interface ExtractionResult {
     totalChars: number
   }
 }
+
+export interface ExtractionBatch {
+  batchIndex: number
+  trigger: 'viewport' | 'scroll' | 'mutation' | 'resize' | 'manual'
+  blocks: TextBlock[]
+  stats: {
+    batchBlocks: number
+    batchChars: number
+    cumulativeBlocks: number
+    cumulativeChars: number
+  }
+}
+
+export interface LazyExtractionConfig {
+  rootMargin: string
+  minBlockChars: number
+  mutationDebounceMs: number
+}

@@ -3,6 +3,7 @@ import { Spinner } from '@/components/spinner'
 import { Button } from '@/components/ui/button'
 import { getExtractionEnabled, setExtractionEnabled } from '@/lib/settings'
 
+const SHOW_MANUAL_EXTRACT = import.meta.env.DEV
 const MANUAL_EXTRACT_MESSAGE = 'gloss-plus-one:manual-extract'
 
 type ManualExtractionResponse =
@@ -90,19 +91,23 @@ export function ExtractionToggle() {
             ? 'Automatic extraction: On'
             : 'Automatic extraction: Off'}
       </Button>
-      <Button
-        type="button"
-        variant="outline"
-        size="sm"
-        className="w-full gap-2"
-        disabled={loading || saving || extracting}
-        onClick={handleManualExtract}
-      >
-        {extracting && <Spinner size="sm" />}
-        {extracting ? 'Extracting current page…' : 'Extract Current Page'}
-      </Button>
+      {SHOW_MANUAL_EXTRACT && (
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="w-full gap-2"
+          disabled={loading || saving || extracting}
+          onClick={handleManualExtract}
+        >
+          {extracting && <Spinner size="sm" />}
+          {extracting ? 'Extracting current page…' : 'Extract Current Page'}
+        </Button>
+      )}
       <p className="text-xs text-muted-foreground">
-        Automatic mode runs on load, refresh, and route changes. Manual mode triggers extraction for the active tab right now.
+        {SHOW_MANUAL_EXTRACT
+          ? 'Automatic mode runs on load, refresh, and route changes. Manual mode is available as a debug fallback.'
+          : 'Automatic mode runs on load, refresh, and route changes.'}
       </p>
       {status && <p className="text-xs text-muted-foreground">{status}</p>}
       {error && <p className="text-xs text-destructive">{error}</p>}

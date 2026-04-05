@@ -1,5 +1,10 @@
 import type { Session } from '@supabase/supabase-js'
-import { extractPageText } from '@/extraction'
+import {
+  LazyExtractor,
+  extractPageText,
+  type ExtractionBatch,
+  type ExtractionResult,
+} from '@/extraction'
 import { getExtractionEnabled } from '@/lib/settings'
 import { getSupabase } from '@/lib/supabase'
 import contentStylesUrl from './index.css?url'
@@ -10,6 +15,7 @@ const URL_WATCH_INTERVAL_MS = 1000
 const NAVIGATION_EVENT = 'gloss-plus-one:navigation'
 const MANUAL_EXTRACT_MESSAGE = 'gloss-plus-one:manual-extract'
 const EXTRACTION_RESULT_MESSAGE = 'gloss-plus-one:extraction-result'
+const EXTRACTION_BATCH_MESSAGE = 'gloss-plus-one:extraction-batch'
 
 type ManualExtractionResponse =
   | { ok: true; url: string; totalBlocks: number; totalChars: number }
@@ -19,7 +25,9 @@ let extractionTimer: number | null = null
 let urlWatchTimer: number | null = null
 let urlObserver: MutationObserver | null = null
 let lastObservedUrl = window.location.href
-let lastExtractedUrl: string | null = null
+let lastManualExtractionUrl: string | null = null
+let lastLazyStartUrl: string | null = null
+let activeExtractor: LazyExtractor | null = null
 
 function extensionStylesheetHref(url: string): string {
   if (url.startsWith('chrome-extension://')) return url
@@ -66,12 +74,14 @@ function registerAutomaticExtractionListeners(): void {
   window.addEventListener('hashchange', () => scheduleExtraction('hashchange'))
   window.addEventListener('pageshow', () => {
     lastObservedUrl = window.location.href
-    lastExtractedUrl = null
+    lastLazyStartUrl = null
+    ensureUrlWatchers()
     scheduleExtraction('pageshow')
   })
   window.addEventListener('pagehide', () => {
     clearScheduledExtraction()
     stopUrlWatchers()
+    stopLazyExtractor()
   })
   window.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') {
@@ -168,29 +178,61 @@ function checkForUrlChange(reason: string): void {
   if (currentUrl === lastObservedUrl) return
 
   lastObservedUrl = currentUrl
-  lastExtractedUrl = null
+  lastLazyStartUrl = null
+  stopLazyExtractor()
   scheduleExtraction(`url-change-${reason}`)
 }
 
 async function runExtraction(reason: string): Promise<void> {
-  await extractCurrentPage({
-    reason,
-    requireEnabled: true,
-    ignoreDuplicateUrl: false,
-    updateLastExtractedUrl: true,
-  })
+  if (!(await getExtractionEnabled())) {
+    lastLazyStartUrl = null
+    stopLazyExtractor()
+    return
+  }
+
+  const session = await getAuthedSession()
+  if (!session) return
+  if (!document.body) return
+
+  const currentUrl = window.location.href
+  if (activeExtractor && lastLazyStartUrl === currentUrl) {
+    return
+  }
+
+  startLazyExtraction(reason)
+}
+
+function startLazyExtraction(reason: string): void {
+  if (!document.body) return
+
+  stopLazyExtractor()
+  activeExtractor = new LazyExtractor(
+    { rootMargin: '300px' },
+    (batch) => {
+      void forwardBatchToBackground(reason, batch)
+    },
+  )
+  activeExtractor.start(document.body)
+  lastLazyStartUrl = window.location.href
+}
+
+function stopLazyExtractor(): void {
+  activeExtractor?.stop()
+  activeExtractor = null
 }
 
 async function handleManualExtraction(): Promise<ManualExtractionResponse> {
   const result = await extractCurrentPage({
-    reason: 'manual-extract',
-    requireEnabled: false,
     ignoreDuplicateUrl: true,
     updateLastExtractedUrl: true,
   })
 
   if (!result.ok) {
     return { ok: false, error: result.error }
+  }
+
+  if (await getExtractionEnabled()) {
+    startLazyExtraction('manual-kickstart')
   }
 
   return {
@@ -202,18 +244,12 @@ async function handleManualExtraction(): Promise<ManualExtractionResponse> {
 }
 
 async function extractCurrentPage(options: {
-  reason: string
-  requireEnabled: boolean
   ignoreDuplicateUrl: boolean
   updateLastExtractedUrl: boolean
 }): Promise<
-  | { ok: true; result: ReturnType<typeof extractPageText> }
+  | { ok: true; result: ExtractionResult }
   | { ok: false; error: string }
 > {
-  if (options.requireEnabled && !(await getExtractionEnabled())) {
-    return { ok: false, error: 'Automatic extraction is disabled' }
-  }
-
   if (!document.body) {
     return { ok: false, error: 'Document body is not ready yet' }
   }
@@ -224,7 +260,7 @@ async function extractCurrentPage(options: {
   }
 
   const currentUrl = window.location.href
-  if (!options.ignoreDuplicateUrl && lastExtractedUrl === currentUrl) {
+  if (!options.ignoreDuplicateUrl && lastManualExtractionUrl === currentUrl) {
     return { ok: false, error: 'This page was already extracted for the current URL' }
   }
 
@@ -232,10 +268,10 @@ async function extractCurrentPage(options: {
     const result = extractPageText(document.body)
 
     if (options.updateLastExtractedUrl) {
-      lastExtractedUrl = currentUrl
+      lastManualExtractionUrl = currentUrl
     }
 
-    await forwardExtractionToBackground(options.reason, result)
+    await forwardExtractionToBackground('manual-extract', result)
     return { ok: true, result }
   } catch (error) {
     console.error('[gloss+1] extraction failed:', error)
@@ -262,9 +298,22 @@ async function getAuthedSession(): Promise<Session | null> {
   return null
 }
 
+async function forwardBatchToBackground(reason: string, batch: ExtractionBatch): Promise<void> {
+  try {
+    await chrome.runtime.sendMessage({
+      type: EXTRACTION_BATCH_MESSAGE,
+      reason,
+      batch,
+      url: window.location.href,
+    })
+  } catch (error) {
+    console.error('[gloss+1] failed to forward extraction batch to service worker:', error)
+  }
+}
+
 async function forwardExtractionToBackground(
   reason: string,
-  result: ReturnType<typeof extractPageText>,
+  result: ExtractionResult,
 ): Promise<void> {
   try {
     await chrome.runtime.sendMessage({

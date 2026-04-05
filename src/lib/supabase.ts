@@ -21,11 +21,20 @@ export function getSupabase(): SupabaseClient | null {
   client = createClient(url, key, {
     auth: {
       storage: chromeStorage,
-      storageKey: 'gloss-plus-one.auth',
+      storageKey: getStorageKey(url),
       persistSession: true,
       autoRefreshToken: true,
     },
   })
 
   return client
+}
+
+function getStorageKey(url: string): string {
+  try {
+    const { host } = new URL(url)
+    return `gloss-plus-one.auth.${host}`
+  } catch {
+    return 'gloss-plus-one.auth'
+  }
 }
