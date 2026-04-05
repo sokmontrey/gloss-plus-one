@@ -24,12 +24,31 @@ export async function signInWithGoogle(): Promise<void> {
   })
   if (!responseUrl) throw new Error('Sign-in was cancelled')
 
-  // Exchange the auth code for a session (PKCE verifier is in chrome.storage from step above).
-  const code = new URL(responseUrl).searchParams.get('code')
-  if (!code) throw new Error('No auth code in redirect URL')
+  console.debug('[auth] redirect URL:', responseUrl)
 
-  const { error: exchangeError } = await supabase.auth.exchangeCodeForSession(code)
-  if (exchangeError) throw exchangeError
+  const url = new URL(responseUrl)
+  const code = url.searchParams.get('code')
+  const hash = new URLSearchParams(url.hash.slice(1))
+  const accessToken = hash.get('access_token')
+  const refreshToken = hash.get('refresh_token')
+
+  if (code) {
+    // PKCE flow — exchange code for session
+    const { error: exchangeError } = await supabase.auth.exchangeCodeForSession(code)
+    if (exchangeError) throw exchangeError
+  } else if (accessToken && refreshToken) {
+    // Implicit flow — set session directly from tokens in hash fragment
+    const { error: setError } = await supabase.auth.setSession({ access_token: accessToken, refresh_token: refreshToken })
+    if (setError) throw setError
+  } else {
+    const reason =
+      url.searchParams.get('error_description') ??
+      hash.get('error_description') ??
+      url.searchParams.get('error') ??
+      hash.get('error') ??
+      'Unknown error'
+    throw new Error(`OAuth failed: ${reason}`)
+  }
 }
 
 export async function signOut(): Promise<void> {

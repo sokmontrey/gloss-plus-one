@@ -30,8 +30,5 @@ shadow.append(link)
 const rootEl = document.createElement('div')
 shadow.append(rootEl)
 
-createRoot(rootEl).render(
-  <StrictMode>
-    <App variant="content" />
-  </StrictMode>,
-)
+// Nothing to render yet — content overlay is not implemented.
+// createRoot(rootEl).render(<App variant="content" />)
