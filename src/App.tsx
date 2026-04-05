@@ -1,4 +1,5 @@
 import { Badge } from '@/components/badge'
+import { ExtractionToggle } from '@/components/ExtractionToggle'
 import { Button } from '@/components/ui/button'
 import { Spinner } from '@/components/spinner'
 import { GoogleSignInButton } from '@/components/GoogleSignInButton'
@@ -37,6 +38,7 @@ export default function App({ variant = 'popup' }: AppProps) {
         user ? (
           <div className="space-y-3">
             <p className="truncate text-sm text-muted-foreground">{user.email}</p>
+            <ExtractionToggle />
             <Button
               type="button"
               variant="outline"
