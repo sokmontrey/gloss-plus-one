@@ -5,7 +5,7 @@ import {
   type ExtractionBatch,
   type ExtractionResult,
 } from '@/extraction'
-import { getExtractionEnabled } from '@/lib/settings'
+import { isSiteEnabled, clearLegacyKeys } from '@/lib/settings'
 import { getSupabase } from '@/lib/supabase'
 import contentStylesUrl from './index.css?url'
 
@@ -57,7 +57,9 @@ shadow.append(document.createElement('div'))
 patchHistoryMethods()
 registerManualExtractionListener()
 registerAutomaticExtractionListeners()
+registerStorageChangeListener()
 primeInitialExtraction()
+void clearLegacyKeys()
 
 function registerManualExtractionListener(): void {
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
@@ -133,6 +135,14 @@ function patchHistoryMethods(): void {
   wrapHistoryMethod('replaceState')
 }
 
+function registerStorageChangeListener(): void {
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area !== 'local') return
+    if (!('gloss-plus-one.extraction-sites' in changes)) return
+    void runExtraction('storage-change')
+  })
+}
+
 function scheduleExtraction(reason: string): void {
   clearScheduledExtraction()
 
@@ -184,7 +194,8 @@ function checkForUrlChange(reason: string): void {
 }
 
 async function runExtraction(reason: string): Promise<void> {
-  if (!(await getExtractionEnabled())) {
+  const host = new URL(window.location.href).host
+  if (!(await isSiteEnabled(host))) {
     lastLazyStartUrl = null
     stopLazyExtractor()
     return
@@ -231,7 +242,7 @@ async function handleManualExtraction(): Promise<ManualExtractionResponse> {
     return { ok: false, error: result.error }
   }
 
-  if (await getExtractionEnabled()) {
+  if (await isSiteEnabled(new URL(window.location.href).host)) {
     startLazyExtraction('manual-kickstart')
   }
 
