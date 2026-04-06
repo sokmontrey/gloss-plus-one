@@ -40,7 +40,7 @@ export interface ExposureSummary {
 export interface Token {
   original: string           // raw surface form preserving casing
   lemma: string              // lowercased normalized form
-  pos: string                // 'unknown' in MVP
+  pos: string                // 'unknown' in MVP (not constrained to pos_tag enum)
   is_word: boolean           // false for punctuation/whitespace pass-throughs
 
   // Stage 3: translation alignment
@@ -79,5 +79,5 @@ export interface ProgressionRow {
   lemma_id: string
   progression_score: number
   exposure_count: number
-  last_seen_at: string
+  last_seen_at: string | null   // null until first seen after row creation
 }

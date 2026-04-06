@@ -3,7 +3,7 @@ import type { Token, ProgressionRow } from '../types.ts'
 import { PIPELINE_CONFIG } from '../config.ts'
 
 // Stage 4: Progression Lookup & Decay
-// Fetches user_progression rows for all target lemmas encountered in Stage 3,
+// Fetches user_progression rows for all target lemmas found in Stage 3,
 // then applies the forgetting-curve decay formula to produce effective_score.
 //
 // Decay formula:
@@ -12,6 +12,10 @@ import { PIPELINE_CONFIG } from '../config.ts'
 //   half_lives = days_since / (stability * BASE_HALFLIFE_DAYS)   (stability > 0)
 //              = days_since / BASE_HALFLIFE_DAYS                 (first exposure)
 //   effective  = max(raw_score * 0.5^half_lives, SCORE_FLOOR)
+//
+// last_seen_at is nullable (null until the user has actually seen the word
+// after the row was created). If null, no decay is applied and raw_score
+// is used directly.
 
 export class DbProgressionLookup {
   constructor(private readonly supabase: SupabaseClient) {}
@@ -53,11 +57,15 @@ export class DbProgressionLookup {
       }
 
       const rawScore = Number(row.progression_score)
-      const exposureCount = row.exposure_count
-      const lastSeenMs = new Date(row.last_seen_at).getTime()
-      const daysSince = (now - lastSeenMs) / 86_400_000
 
-      const stability = Math.log2(exposureCount + 1)
+      // last_seen_at is null when the row exists but the user hasn't seen it yet —
+      // no decay to apply, use raw score directly.
+      if (!row.last_seen_at) {
+        return { ...token, effective_score: Math.max(rawScore, PIPELINE_CONFIG.SCORE_FLOOR) }
+      }
+
+      const daysSince = (now - new Date(row.last_seen_at).getTime()) / 86_400_000
+      const stability = Math.log2(row.exposure_count + 1)
       const halfLives = stability > 0
         ? daysSince / (stability * PIPELINE_CONFIG.BASE_HALFLIFE_DAYS)
         : daysSince / PIPELINE_CONFIG.BASE_HALFLIFE_DAYS

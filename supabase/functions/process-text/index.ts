@@ -34,22 +34,17 @@ Deno.serve(async (req: Request) => {
       return json({ error: 'Missing authorization header' }, 401)
     }
 
-    // User-scoped client: validates the JWT via getUser()
-    const userClient = createClient(
+    // User-scoped client for all DB operations — RLS enforces data boundaries.
+    const client = createClient(
       Deno.env.get('SUPABASE_URL')!,
       Deno.env.get('SUPABASE_ANON_KEY')!,
       { global: { headers: { Authorization: authHeader } } },
     )
-    const { data: { user }, error: authError } = await userClient.auth.getUser()
+
+    const { data: { user }, error: authError } = await client.auth.getUser()
     if (authError || !user) {
       return json({ error: 'Invalid or expired token' }, 401)
     }
-
-    // Service-role client: used for DB writes (bypasses RLS)
-    const serviceClient = createClient(
-      Deno.env.get('SUPABASE_URL')!,
-      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
-    )
 
     // --- Request validation ---
     const body = await req.json() as Partial<ProcessTextRequest>
@@ -59,7 +54,10 @@ Deno.serve(async (req: Request) => {
       typeof body.source_language !== 'string' ||
       typeof body.target_language !== 'string'
     ) {
-      return json({ error: 'Invalid request: text, source_language, and target_language are required' }, 400)
+      return json(
+        { error: 'Invalid request: text, source_language, and target_language are required' },
+        400,
+      )
     }
 
     const request: ProcessTextRequest = {
@@ -68,6 +66,27 @@ Deno.serve(async (req: Request) => {
       target_language: body.target_language,
       max_new_words: typeof body.max_new_words === 'number' ? body.max_new_words : 3,
       source_url: body.source_url,
+    }
+
+    // --- Resolve ISO codes to language UUIDs ---
+    const { data: langRows, error: langError } = await client
+      .from('languages')
+      .select('id, code')
+      .in('code', [request.source_language, request.target_language])
+
+    if (langError) {
+      return json({ error: 'Failed to resolve language codes' }, 500)
+    }
+
+    const langByCode = new Map((langRows ?? []).map((r: { id: string; code: string }) => [r.code, r.id]))
+    const sourceLangId = langByCode.get(request.source_language)
+    const targetLangId = langByCode.get(request.target_language)
+
+    if (!sourceLangId || !targetLangId) {
+      return json(
+        { error: `Unsupported language code: ${!sourceLangId ? request.source_language : request.target_language}` },
+        400,
+      )
     }
 
     console.log('[process-text]', {
@@ -81,42 +100,56 @@ Deno.serve(async (req: Request) => {
     // --- Pipeline ---
     const expressionDetector = new NoOpExpressionDetector()
     const tokenizer = new SimpleTokenLemmatizer()
-    const aligner = new DbTranslationAligner(serviceClient)
-    const progressionLookup = new DbProgressionLookup(serviceClient)
+    const aligner = new DbTranslationAligner(client)
+    const progressionLookup = new DbProgressionLookup(client)
     const replacer = new ThresholdReplacer()
     const contextScorer = new CategoryContextScorer()
     const selector = new TopNSelector()
-    const updater = new DbProgressionUpdater(serviceClient)
+    const updater = new DbProgressionUpdater(client)
     const assembler = new SegmentAssembler()
 
     // Stage 1: expression detection (passthrough in MVP)
     const processedText = expressionDetector.detect(request.text)
 
     // Stage 2: tokenize + lemmatize
-    let tokens = tokenizer.process(processedText)
+    const rawTokens = tokenizer.process(processedText)
 
-    // Stage 3: translation alignment
-    tokens = await aligner.align(tokens, request.source_language, request.target_language)
+    // Stage 3: translation alignment (stamps target_lemma_id onto each token)
+    const alignedTokens = await aligner.align(rawTokens, sourceLangId, targetLangId)
 
-    // Stage 4: progression lookup + decay
-    tokens = await progressionLookup.lookup(tokens, user.id)
+    // Stage 4: progression lookup + decay (stamps effective_score)
+    const scoredTokens = await progressionLookup.lookup(alignedTokens, user.id)
 
-    // Stage 5: known word replacement
-    tokens = replacer.replace(tokens)
+    // Stage 5: known word replacement (stamps is_known)
+    const replacedTokens = replacer.replace(scoredTokens)
 
-    // Stage 6: context scoring
-    tokens = contextScorer.score(tokens)
+    // Stage 6: context scoring (stamps context_score)
+    const contextTokens = contextScorer.score(replacedTokens)
 
-    // Stage 7: i+1 selection
-    tokens = selector.select(tokens, request.max_new_words)
+    // Stage 7: i+1 selection (stamps is_new_l2)
+    const selectedTokens = selector.select(contextTokens, request.max_new_words)
 
-    // Stage 8: progression update (fire-and-forget; don't block the response)
-    updater.update(tokens, user.id).catch((err) => {
+    // Stage 8: progression update — fire-and-forget to keep latency low.
+    // TODO: add structured error reporting so silent failures surface in metrics.
+    updater.update(selectedTokens, user.id).catch((err) => {
       console.error('[process-text] progression update failed:', err)
     })
 
     // Stage 9: response assembly
-    const response: ProcessTextResponse = assembler.assemble(tokens)
+    const response: ProcessTextResponse = assembler.assemble(selectedTokens)
+
+    // Log to processed_text_log — fire-and-forget.
+    client.from('processed_text_log').insert({
+      user_id: user.id,
+      source_language_id: sourceLangId,
+      target_language_id: targetLangId,
+      word_count: response.stats.total_words,
+      words_replaced: response.stats.known_replaced,
+      words_introduced: response.stats.new_introduced,
+      source_url: request.source_url ?? null,
+    }).then(({ error }) => {
+      if (error) console.error('[process-text] failed to write processed_text_log:', error.message)
+    })
 
     return json(response)
   } catch (err) {
