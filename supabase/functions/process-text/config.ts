@@ -1,0 +1,27 @@
+export const PIPELINE_CONFIG = {
+  REPLACEMENT_THRESHOLD: 0.50,
+  CONTEXT_FLOOR: 0.30,
+  SCORE_FLOOR: 0.05,
+  REINFORCEMENT_BUMP: 0.02,
+  EXPOSURE_BUMP: 0.05,
+  I1_INTRODUCTION_BUMP: 0.08,
+  BASE_HALFLIFE_DAYS: 7,
+  POS_CONTEXT_SCORES: {
+    det:     0.95,
+    conj:    0.93,
+    prep:    0.90,
+    pron:    0.88,
+    aux:     0.85,
+    part:    0.80,
+    num:     0.75,
+    adv:     0.60,
+    adj:     0.40,
+    verb:    0.35,
+    noun:    0.20,
+    unknown: 0.15,
+  } as Record<string, number>,
+  CATEGORY_FALLBACK: {
+    function: 0.90,
+    content:  0.25,
+  } as Record<string, number>,
+} as const

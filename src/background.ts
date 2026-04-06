@@ -4,14 +4,7 @@ import { getSupabase } from '@/lib/supabase'
 const EXTRACTION_RESULT_MESSAGE = 'gloss-plus-one:extraction-result'
 const EXTRACTION_BATCH_MESSAGE = 'gloss-plus-one:extraction-batch'
 
-const EDGE_FUNCTION_URL = `${import.meta.env.VITE_SUPABASE_URL as string}/functions/v1/process-extraction`
-
-const tabExtractions = new Map<number, {
-  url: string
-  batches: ExtractionBatch[]
-  totalBlocks: number
-  totalChars: number
-}>()
+const PROCESS_TEXT_URL = `${import.meta.env.VITE_SUPABASE_URL as string}/functions/v1/process-text`
 
 console.info('[gloss+1] service worker started')
 
@@ -33,101 +26,98 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   return undefined
 })
 
-chrome.tabs.onRemoved.addListener((tabId) => {
-  tabExtractions.delete(tabId)
-})
-
-async function sendBatchToEdgeFunction(
+async function sendBatchToProcessText(
   payload: {
     url: string
-    title: string
     batch: ExtractionBatch
-    extractedAt: string
-    tabId: number
   },
   retried = false,
 ): Promise<void> {
   const supabase = getSupabase()
   if (!supabase) {
-    console.warn('[gloss+1] Supabase client unavailable, skipping edge function call')
+    console.warn('[gloss+1] Supabase client unavailable, skipping process-text call')
     return
   }
 
   const { data: { session } } = await supabase.auth.getSession()
   if (!session?.access_token) {
-    console.warn('[gloss+1] No active session, skipping edge function call')
+    console.warn('[gloss+1] No active session, skipping process-text call')
     return
   }
 
+  // Fetch the user's target language from their profile.
+  // Skip if not set — the user hasn't completed onboarding yet.
+  const { data: profile } = await supabase
+    .from('user_profiles')
+    .select('target_language')
+    .eq('user_id', session.user.id)
+    .single()
+
+  if (!profile?.target_language) {
+    console.info('[gloss+1] No target language set, skipping process-text call')
+    return
+  }
+
+  // Join block texts into a single string for the pipeline.
+  const text = payload.batch.blocks.map((b) => b.text).join('\n')
+  if (!text.trim()) return
+
   let response: Response
   try {
-    response = await fetch(EDGE_FUNCTION_URL, {
+    response = await fetch(PROCESS_TEXT_URL, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${session.access_token}`,
       },
-      body: JSON.stringify(payload),
+      body: JSON.stringify({
+        text,
+        source_language: 'en',
+        target_language: profile.target_language,
+        max_new_words: 3,
+        source_url: payload.url,
+      }),
     })
   } catch (err) {
-    console.error('[gloss+1] Edge function fetch failed:', err)
+    console.error('[gloss+1] process-text fetch failed:', err)
     return
   }
 
   if (response.status === 401 && !retried) {
-    // Token may have expired between the client's refresh cycle and this call — refresh and retry once
     const { error } = await supabase.auth.refreshSession()
     if (error) {
       console.warn('[gloss+1] Session refresh failed, dropping batch:', error.message)
       return
     }
-    return sendBatchToEdgeFunction(payload, true)
+    return sendBatchToProcessText(payload, true)
   }
 
   if (!response.ok) {
     const body = await response.text().catch(() => '')
-    console.error('[gloss+1] Edge function error:', response.status, body)
+    console.error('[gloss+1] process-text error:', response.status, body)
     return
   }
 
-  console.info('[gloss+1] batch forwarded to edge function')
+  const result = await response.json()
+  console.info('[gloss+1] process-text response:', {
+    stats: result.stats,
+    newExposures: result.new_exposures?.length ?? 0,
+  })
 }
 
 function handleExtractionBatch(
-  message: { reason: string; batch: ExtractionBatch; url: string; title?: string },
+  message: { reason: string; batch: ExtractionBatch; url: string },
   sender: chrome.runtime.MessageSender,
 ): void {
   const tabId = sender.tab?.id
   if (tabId === undefined) return
 
-  const existing = tabExtractions.get(tabId)
-  const extraction = !existing || existing.url !== message.url
-    ? { url: message.url, batches: [], totalBlocks: 0, totalChars: 0 }
-    : existing
+  void sendBatchToProcessText({ url: message.url, batch: message.batch })
 
-  extraction.batches.push(message.batch)
-  extraction.totalBlocks = message.batch.stats.cumulativeBlocks
-  extraction.totalChars = message.batch.stats.cumulativeChars
-  tabExtractions.set(tabId, extraction)
-
-  void sendBatchToEdgeFunction({
-    url: extraction.url,
-    title: message.title ?? '',
-    batch: message.batch,
-    extractedAt: new Date().toISOString(),
-    tabId,
-  })
-
-  console.info('[gloss+1] extraction batch received in service worker:', {
-    // tabId,
-    // url: extraction.url,
+  console.info('[gloss+1] extraction batch received:', {
     reason: message.reason,
-    // batch: message.batch,
-    summary: {
-      batches: extraction.batches.length,
-      totalBlocks: extraction.totalBlocks,
-      totalChars: extraction.totalChars,
-    },
+    batchBlocks: message.batch.stats.batchBlocks,
+    batchChars: message.batch.stats.batchChars,
   })
 }
 
