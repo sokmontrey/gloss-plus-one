@@ -1,10 +1,11 @@
 export const PIPELINE_CONFIG = {
   REPLACEMENT_THRESHOLD: 0.50,
-  CONTEXT_FLOOR: 0.30,
+  CONTEXT_FLOOR: 0.20,
   SCORE_FLOOR: 0.05,
   REINFORCEMENT_BUMP: 0.02,
   EXPOSURE_BUMP: 0.05,
   I1_INTRODUCTION_BUMP: 0.08,
+  ACTIVE_ENGAGEMENT_BUMP: 0.10, // user hover/click on a new_l2 word — engagement/index.ts must mirror this value
   BASE_HALFLIFE_DAYS: 7,
   POS_CONTEXT_SCORES: {
     det:     0.95,

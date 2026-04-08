@@ -10,15 +10,16 @@ import { PIPELINE_CONFIG } from '../config.ts'
 //   - context_score >= CONTEXT_FLOOR (predictable enough from context)
 //   - effective_score < REPLACEMENT_THRESHOLD (not yet known)
 //
-// Ranking: sort by context_score ascending so content words (low score, higher
-// teaching value) are preferred over function words.
+// Ranking: sort DESCENDING by context_score.
+// High context score = word is predictable from surrounding context = user can
+// infer meaning = safe to introduce as i+1. Low context score = content word
+// carrying unique meaning = harder to infer, not appropriate for first exposure.
 //
 // Deduplication: if the same target lemma appears multiple times, only the
-// instance with the highest context_score is introduced.
+// instance with the highest context_score is eligible.
 
 export class TopNSelector {
   select(tokens: Token[], maxNew: number): Token[] {
-    // Collect eligible indices
     const candidates: Array<{ index: number; token: Token }> = []
     for (let i = 0; i < tokens.length; i++) {
       const t = tokens[i]
@@ -42,9 +43,9 @@ export class TopNSelector {
       }
     }
 
-    // Sort ascending by context_score (content words first — better teaching targets)
+    // Sort DESCENDING: highest context score first (safest introductions first)
     const ranked = [...bestByLemma.values()].sort(
-      (a, b) => a.token.context_score - b.token.context_score,
+      (a, b) => b.token.context_score - a.token.context_score,
     )
 
     const selectedIndices = new Set(ranked.slice(0, maxNew).map((c) => c.index))

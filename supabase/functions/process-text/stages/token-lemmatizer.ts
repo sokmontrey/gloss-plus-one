@@ -21,6 +21,7 @@ export class SimpleTokenLemmatizer {
         lemma: is_word ? span.toLowerCase() : span,
         pos: 'unknown',
         is_word,
+        expression_id: null,
         source_lemma_id: null,
         target_lemma_id: null,
         target_lemma: null,

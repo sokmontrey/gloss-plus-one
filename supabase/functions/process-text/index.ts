@@ -118,13 +118,16 @@ Deno.serve(async (req: Request) => {
     const alignedTokens = await aligner.align(rawTokens, sourceLangId, targetLangId)
 
     // Stage 4: progression lookup + decay (stamps effective_score)
-    const scoredTokens = await progressionLookup.lookup(alignedTokens, user.id)
+    const scoredTokens = await progressionLookup.lookup(alignedTokens, user.id, sourceLangId, targetLangId)
 
     // Stage 5: known word replacement (stamps is_known)
     const replacedTokens = replacer.replace(scoredTokens)
 
     // Stage 6: context scoring (stamps context_score)
-    const contextTokens = contextScorer.score(replacedTokens)
+    // maskedIndices = positions already replaced in phase 1; passed for future
+    // ML scorers that need to know which tokens are already L2.
+    const maskedIndices = replacedTokens.flatMap((t, i) => t.is_known ? [i] : [])
+    const contextTokens = contextScorer.score(replacedTokens, maskedIndices)
 
     // Stage 7: i+1 selection (stamps is_new_l2)
     const selectedTokens = selector.select(contextTokens, request.max_new_words)

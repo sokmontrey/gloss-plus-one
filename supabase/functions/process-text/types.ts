@@ -18,14 +18,10 @@ export interface ProcessTextResponse {
   }
 }
 
-export interface Segment {
-  original: string
-  display: string
-  type: 'l1' | 'known_l2' | 'new_l2'
-  target_lemma_id?: string
-  progression_score?: number
-  context_score?: number
-}
+export type Segment =
+  | { type: 'l1'; display: string }
+  | { type: 'known_l2'; display: string; original: string; target_lemma_id: string; progression_score: number }
+  | { type: 'new_l2';   display: string; original: string; target_lemma_id: string; progression_score: number }
 
 export interface ExposureSummary {
   target_lemma_id: string
@@ -42,6 +38,9 @@ export interface Token {
   lemma: string              // lowercased normalized form
   pos: string                // 'unknown' in MVP (not constrained to pos_tag enum)
   is_word: boolean           // false for punctuation/whitespace pass-throughs
+
+  // Stage 1: expression detection
+  expression_id: string | null  // set when token belongs to a locked expression span
 
   // Stage 3: translation alignment
   source_lemma_id: string | null
