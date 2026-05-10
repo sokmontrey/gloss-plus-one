@@ -36,7 +36,7 @@ const BLOCK_TAGS = new Set([
 
 export function extractPageText(root: Element = document.body): ExtractionResult {
   const blocks = discoverBlockElements(root)
-    .map((block) => extractBlockText(block, root))
+    .map((block, sequence) => extractBlockText(block, root, sequence))
     .filter((block): block is TextBlock => block !== null)
 
   const totalChars = blocks.reduce((count, block) => count + block.text.length, 0)
@@ -78,7 +78,7 @@ export function discoverBlockElements(root: Element): Element[] {
   return blocks
 }
 
-export function extractBlockText(block: Element, root: Element): TextBlock | null {
+export function extractBlockText(block: Element, root: Element, sequence = 0): TextBlock | null {
   const fragments: string[] = []
   const walker = document.createTreeWalker(block, NodeFilter.SHOW_TEXT, {
     acceptNode(node) {
@@ -103,10 +103,17 @@ export function extractBlockText(block: Element, root: Element): TextBlock | nul
 
   if (fragments.length === 0) return null
 
+  const text = fragments.join(' ')
+  const path = getElementPath(block, root)
+  const textHash = hashText(text)
+
   return {
-    text: fragments.join(' '),
+    blockId: createBlockId(sequence, path, textHash),
+    sequence,
+    textHash,
+    text,
     tagName: block.tagName,
-    path: getElementPath(block, root),
+    path,
   }
 }
 
@@ -129,6 +136,7 @@ function normalizeWhitespace(text: string): string {
 function isIgnoredNode(element: Element, root: Element): boolean {
   for (let current: Element | null = element; current; current = current.parentElement) {
     if (SKIP_TAGS.has(current.tagName)) return true
+    if (current.hasAttribute('data-gloss-plus-one')) return true
     if (current.hasAttribute('hidden')) return true
     if (current.getAttribute('aria-hidden') === 'true') return true
 
@@ -151,6 +159,21 @@ function getBlockAncestor(element: Element, root: Element): Element {
   }
 
   return root
+}
+
+function createBlockId(sequence: number, path: string, textHash: string): string {
+  return `block-${hashText(`${window.location.href}|${sequence}|${path}|${textHash}`)}`
+}
+
+export function hashText(text: string): string {
+  let hash = 2166136261
+
+  for (let index = 0; index < text.length; index += 1) {
+    hash ^= text.charCodeAt(index)
+    hash = Math.imul(hash, 16777619)
+  }
+
+  return (hash >>> 0).toString(36)
 }
 
 function getElementPath(element: Element, root: Element): string {

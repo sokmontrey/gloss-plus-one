@@ -19,6 +19,3 @@ node_modules/.tmp
 
 # Pi project-local packages (if using pi install -l)
 .pi/npm/
-
-.pi/
-taskplane-tasks/

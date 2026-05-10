@@ -10,8 +10,13 @@ import { getSupabase } from '@/lib/supabase'
 type AppProps = { variant?: 'popup' | 'content' }
 
 export default function App({ variant = 'popup' }: AppProps) {
-  const { user, loading } = useAuth()
+  const { user, profile, loading, profileError } = useAuth()
   const configured = Boolean(getSupabase())
+  const displayName =
+    profile?.name?.trim()
+    || (typeof user?.user_metadata?.full_name === 'string' ? user.user_metadata.full_name : null)
+    || (typeof user?.user_metadata?.name === 'string' ? user.user_metadata.name : null)
+    || user?.email
 
   return (
     <div
@@ -37,7 +42,15 @@ export default function App({ variant = 'popup' }: AppProps) {
       ) : variant === 'popup' && (
         user ? (
           <div className="space-y-3">
-            <p className="truncate text-sm text-muted-foreground">{user.email}</p>
+            <div className="space-y-0.5">
+              {displayName && (
+                <p className="truncate text-sm font-medium text-foreground">{displayName}</p>
+              )}
+              <p className="truncate text-xs text-muted-foreground">{profile?.email ?? user.email}</p>
+            </div>
+            {profileError && (
+              <p className="text-xs text-destructive">{profileError}</p>
+            )}
             <ExtractionToggle />
             <Button
               type="button"

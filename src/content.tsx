@@ -1,9 +1,13 @@
 import type { Session } from '@supabase/supabase-js'
 import {
   LazyExtractor,
+  extractBlockText,
   extractPageText,
   type ExtractionBatch,
   type ExtractionResult,
+  type InlineEdit,
+  type PipelineResponse,
+  type TextBlock,
 } from '@/extraction'
 import { isSiteEnabled, clearLegacyKeys } from '@/lib/settings'
 import { getSupabase } from '@/lib/supabase'
@@ -16,6 +20,7 @@ const NAVIGATION_EVENT = 'gloss-plus-one:navigation'
 const MANUAL_EXTRACT_MESSAGE = 'gloss-plus-one:manual-extract'
 const EXTRACTION_RESULT_MESSAGE = 'gloss-plus-one:extraction-result'
 const EXTRACTION_BATCH_MESSAGE = 'gloss-plus-one:extraction-batch'
+const PIPELINE_RESPONSE_MESSAGE = 'gloss-plus-one:pipeline-response'
 
 type ManualExtractionResponse =
   | { ok: true; url: string; totalBlocks: number; totalChars: number }
@@ -28,6 +33,12 @@ let lastObservedUrl = window.location.href
 let lastManualExtractionUrl: string | null = null
 let lastLazyStartUrl: string | null = null
 let activeExtractor: LazyExtractor | null = null
+const blockRegistry = new Map<string, TextBlock>()
+
+const contentWindow = window as typeof window & {
+  __glossPlusOneContentLoaded?: boolean
+  __glossPlusOneHistoryPatched?: boolean
+}
 
 function extensionStylesheetHref(url: string): string {
   if (url.startsWith('chrome-extension://')) return url
@@ -35,31 +46,39 @@ function extensionStylesheetHref(url: string): string {
   return chrome.runtime.getURL(path)
 }
 
-const mount = document.createElement('div')
-mount.id = 'gloss-plus-one-root'
-mount.setAttribute('data-gloss-plus-one', '')
-Object.assign(mount.style, {
-  all: 'initial',
-  position: 'fixed',
-  right: '12px',
-  bottom: '12px',
-  zIndex: '2147483647',
-})
-document.documentElement.append(mount)
+initializeContentScript()
 
-const shadow = mount.attachShadow({ mode: 'open' })
-const link = document.createElement('link')
-link.rel = 'stylesheet'
-link.href = extensionStylesheetHref(contentStylesUrl)
-shadow.append(link)
-shadow.append(document.createElement('div'))
+function initializeContentScript(): void {
+  if (contentWindow.__glossPlusOneContentLoaded) return
+  contentWindow.__glossPlusOneContentLoaded = true
 
-patchHistoryMethods()
-registerManualExtractionListener()
-registerAutomaticExtractionListeners()
-registerStorageChangeListener()
-primeInitialExtraction()
-void clearLegacyKeys()
+  const mount = document.createElement('div')
+  mount.id = 'gloss-plus-one-root'
+  mount.setAttribute('data-gloss-plus-one', '')
+  Object.assign(mount.style, {
+    all: 'initial',
+    position: 'fixed',
+    right: '12px',
+    bottom: '12px',
+    zIndex: '2147483647',
+  })
+  document.documentElement.append(mount)
+
+  const shadow = mount.attachShadow({ mode: 'open' })
+  const link = document.createElement('link')
+  link.rel = 'stylesheet'
+  link.href = extensionStylesheetHref(contentStylesUrl)
+  shadow.append(link)
+  shadow.append(document.createElement('div'))
+
+  patchHistoryMethods()
+  registerManualExtractionListener()
+  registerPipelineResponseListener()
+  registerAutomaticExtractionListeners()
+  registerStorageChangeListener()
+  primeInitialExtraction()
+  void clearLegacyKeys()
+}
 
 function registerManualExtractionListener(): void {
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
@@ -67,6 +86,15 @@ function registerManualExtractionListener(): void {
 
     void handleManualExtraction().then(sendResponse)
     return true
+  })
+}
+
+function registerPipelineResponseListener(): void {
+  chrome.runtime.onMessage.addListener((message) => {
+    if (!message || message.type !== PIPELINE_RESPONSE_MESSAGE) return undefined
+
+    applyPipelineResponse(message.response as PipelineResponse)
+    return false
   })
 }
 
@@ -114,12 +142,11 @@ function primeInitialExtraction(): void {
 }
 
 function patchHistoryMethods(): void {
-  if ((window as typeof window & { __glossPlusOneHistoryPatched?: boolean }).__glossPlusOneHistoryPatched) {
+  if (contentWindow.__glossPlusOneHistoryPatched) {
     return
   }
 
-  const patchedWindow = window as typeof window & { __glossPlusOneHistoryPatched?: boolean }
-  patchedWindow.__glossPlusOneHistoryPatched = true
+  contentWindow.__glossPlusOneHistoryPatched = true
 
   const wrapHistoryMethod = <T extends 'pushState' | 'replaceState'>(methodName: T) => {
     const original = history[methodName]
@@ -220,6 +247,7 @@ function startLazyExtraction(reason: string): void {
   activeExtractor = new LazyExtractor(
     { rootMargin: '300px' },
     (batch) => {
+      registerBlocks(batch.blocks)
       void forwardBatchToBackground(reason, batch)
     },
   )
@@ -277,6 +305,7 @@ async function extractCurrentPage(options: {
 
   try {
     const result = extractPageText(document.body)
+    registerBlocks(result.blocks)
 
     if (options.updateLastExtractedUrl) {
       lastManualExtractionUrl = currentUrl
@@ -309,7 +338,199 @@ async function getAuthedSession(): Promise<Session | null> {
   return null
 }
 
+function registerBlocks(blocks: TextBlock[]): void {
+  for (const block of blocks) {
+    blockRegistry.set(block.blockId, block)
+  }
+}
+
+function applyPipelineResponse(response: PipelineResponse): void {
+  let appliedEdits = 0
+  let skippedEdits = 0
+
+  for (const blockResponse of response.blocks) {
+    const block = blockRegistry.get(blockResponse.blockId)
+    if (!block) {
+      console.warn('[gloss+1] skipped pipeline block with no registry entry:', blockResponse.blockId)
+      skippedEdits += blockResponse.edits.length
+      continue
+    }
+
+    const element = resolveElementPath(block.path)
+    if (!element) {
+      console.warn('[gloss+1] skipped pipeline block with stale path:', block.path)
+      skippedEdits += blockResponse.edits.length
+      continue
+    }
+
+    const currentBlock = extractBlockText(element, document.body, block.sequence)
+    if (!currentBlock) {
+      skippedEdits += blockResponse.edits.length
+      continue
+    }
+
+    const validEdits = getValidNonOverlappingEdits(currentBlock.text, blockResponse.edits)
+    skippedEdits += blockResponse.edits.length - validEdits.length
+
+    for (const edit of validEdits.sort((a, b) => b.start - a.start)) {
+      if (applyInlineEdit(element, currentBlock.text, edit)) {
+        appliedEdits += 1
+      } else {
+        skippedEdits += 1
+      }
+    }
+  }
+
+  console.info('[gloss+1] applied pipeline response:', {
+    requestId: response.requestId,
+    appliedEdits,
+    skippedEdits,
+  })
+}
+
+function getValidNonOverlappingEdits(text: string, edits: InlineEdit[]): InlineEdit[] {
+  const sorted = [...edits].sort((a, b) => a.start - b.start)
+  const valid: InlineEdit[] = []
+  let previousEnd = -1
+
+  for (const edit of sorted) {
+    if (edit.start < 0 || edit.end > text.length || edit.start >= edit.end) continue
+    if (edit.start < previousEnd) continue
+    if (text.slice(edit.start, edit.end) !== edit.original) continue
+
+    valid.push(edit)
+    previousEnd = edit.end
+  }
+
+  return valid
+}
+
+function applyInlineEdit(element: Element, text: string, edit: InlineEdit): boolean {
+  const occurrence = countOriginalOccurrences(text.slice(0, edit.start), edit.original)
+  const target = findOriginalOccurrenceInTextNodes(element, edit.original, occurrence)
+  if (!target) return false
+
+  const span = document.createElement('span')
+  span.textContent = edit.replacement
+  span.dataset.glossPlusOneEditId = edit.id
+  span.dataset.glossPlusOneOriginal = edit.original
+  span.style.borderBottom = getHighlightBorder(edit)
+
+  const range = document.createRange()
+  range.setStart(target.node, target.start)
+  range.setEnd(target.node, target.end)
+  range.deleteContents()
+  range.insertNode(span)
+  return true
+}
+
+function countOriginalOccurrences(text: string, original: string): number {
+  return findOriginalMatches(text, original).length
+}
+
+function findOriginalOccurrenceInTextNodes(
+  element: Element,
+  original: string,
+  occurrence: number,
+): { node: Text; start: number; end: number } | null {
+  const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT, {
+    acceptNode(node) {
+      if (!(node instanceof Text) || !node.parentElement) return NodeFilter.FILTER_REJECT
+      if (node.parentElement.closest('[data-gloss-plus-one-edit-id]')) return NodeFilter.FILTER_REJECT
+      return NodeFilter.FILTER_ACCEPT
+    },
+  })
+  let seen = 0
+
+  while (walker.nextNode()) {
+    const node = walker.currentNode
+    if (!(node instanceof Text)) continue
+
+    for (const match of findOriginalMatches(node.textContent ?? '', original)) {
+      if (seen === occurrence) {
+        return { node, start: match.start, end: match.end }
+      }
+      seen += 1
+    }
+  }
+
+  return null
+}
+
+function findOriginalMatches(text: string, original: string): Array<{ start: number; end: number }> {
+  if (!original) return []
+
+  const matches: Array<{ start: number; end: number }> = []
+  let start = 0
+
+  while (start < text.length) {
+    const index = text.indexOf(original, start)
+    if (index === -1) break
+
+    matches.push({ start: index, end: index + original.length })
+    start = index + original.length
+  }
+
+  return matches
+}
+
+function getHighlightBorder(edit: InlineEdit): string {
+  if (edit.highlight?.borderStyle) return edit.highlight.borderStyle
+
+  const color = edit.highlight?.color
+  if (color) return `2px solid ${color}`
+
+  switch (edit.highlight?.level) {
+    case 'low':
+      return '1px solid #fde68a'
+    case 'high':
+      return '3px solid #eab308'
+    case 'medium':
+    default:
+      return '2px solid #facc15'
+  }
+}
+
+function resolveElementPath(path: string): Element | null {
+  if (!document.body) return null
+
+  let current: Element = document.body
+  const segments = path.split('/').filter(Boolean)
+  if (segments.length === 0) return null
+
+  const first = parsePathSegment(segments[0])
+  const startIndex = first?.tagName === current.tagName ? 1 : 0
+
+  for (const segment of segments.slice(startIndex)) {
+    const parsed = parsePathSegment(segment)
+    if (!parsed) return null
+
+    const candidates = Array.from(current.children).filter((child) => child.tagName === parsed.tagName)
+    const next = candidates[parsed.index]
+    if (!next) return null
+    current = next
+  }
+
+  return current
+}
+
+function parsePathSegment(segment: string): { tagName: string; index: number } | null {
+  const match = /^(?<tagName>[A-Z0-9-]+)\[(?<index>\d+)\]$/.exec(segment)
+  if (!match?.groups) return null
+
+  return {
+    tagName: match.groups.tagName,
+    index: Number.parseInt(match.groups.index, 10),
+  }
+}
+
 async function forwardBatchToBackground(reason: string, batch: ExtractionBatch): Promise<void> {
+  console.info('[gloss+1] extraction batch (page, raw):', {
+    reason,
+    url: window.location.href,
+    joinedText: batch.blocks.map((b) => b.text).join('\n'),
+    batch,
+  })
   try {
     await chrome.runtime.sendMessage({
       type: EXTRACTION_BATCH_MESSAGE,
@@ -326,6 +547,7 @@ async function forwardExtractionToBackground(
   reason: string,
   result: ExtractionResult,
 ): Promise<void> {
+  console.info('[gloss+1] extraction result (page, raw):', { reason, result })
   try {
     await chrome.runtime.sendMessage({
       type: EXTRACTION_RESULT_MESSAGE,

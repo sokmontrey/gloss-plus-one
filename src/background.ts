@@ -1,10 +1,8 @@
-import type { ExtractionBatch, ExtractionResult } from '@/extraction'
-import { getSupabase } from '@/lib/supabase'
+import type { ExtractionBatch, ExtractionResult, PipelineResponse, TextBlock } from '@/extraction'
 
 const EXTRACTION_RESULT_MESSAGE = 'gloss-plus-one:extraction-result'
 const EXTRACTION_BATCH_MESSAGE = 'gloss-plus-one:extraction-batch'
-
-const PROCESS_TEXT_URL = `${import.meta.env.VITE_SUPABASE_URL as string}/functions/v1/process-text`
+const PIPELINE_RESPONSE_MESSAGE = 'gloss-plus-one:pipeline-response'
 
 console.info('[gloss+1] service worker started')
 
@@ -26,85 +24,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   return undefined
 })
 
-async function sendBatchToProcessText(
-  payload: {
-    url: string
-    batch: ExtractionBatch
-  },
-  retried = false,
-): Promise<void> {
-  const supabase = getSupabase()
-  if (!supabase) {
-    console.warn('[gloss+1] Supabase client unavailable, skipping process-text call')
-    return
-  }
-
-  const { data: { session } } = await supabase.auth.getSession()
-  if (!session?.access_token) {
-    console.warn('[gloss+1] No active session, skipping process-text call')
-    return
-  }
-
-  // Fetch the user's target language from their profile.
-  // Skip if not set — the user hasn't completed onboarding yet.
-  const { data: profile } = await supabase
-    .from('user_profiles')
-    .select('target_language')
-    .eq('user_id', session.user.id)
-    .single()
-
-  if (!profile?.target_language) {
-    console.info('[gloss+1] No target language set, skipping process-text call')
-    return
-  }
-
-  // Join block texts into a single string for the pipeline.
-  const text = payload.batch.blocks.map((b) => b.text).join('\n')
-  if (!text.trim()) return
-
-  let response: Response
-  try {
-    response = await fetch(PROCESS_TEXT_URL, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${session.access_token}`,
-      },
-      body: JSON.stringify({
-        text,
-        source_language: 'en',
-        target_language: profile.target_language,
-        max_new_words: 3,
-        source_url: payload.url,
-      }),
-    })
-  } catch (err) {
-    console.error('[gloss+1] process-text fetch failed:', err)
-    return
-  }
-
-  if (response.status === 401 && !retried) {
-    const { error } = await supabase.auth.refreshSession()
-    if (error) {
-      console.warn('[gloss+1] Session refresh failed, dropping batch:', error.message)
-      return
-    }
-    return sendBatchToProcessText(payload, true)
-  }
-
-  if (!response.ok) {
-    const body = await response.text().catch(() => '')
-    console.error('[gloss+1] process-text error:', response.status, body)
-    return
-  }
-
-  const result = await response.json()
-  console.info('[gloss+1] process-text response:', {
-    stats: result.stats,
-    newExposures: result.new_exposures?.length ?? 0,
-  })
-}
-
 function handleExtractionBatch(
   message: { reason: string; batch: ExtractionBatch; url: string },
   sender: chrome.runtime.MessageSender,
@@ -112,12 +31,11 @@ function handleExtractionBatch(
   const tabId = sender.tab?.id
   if (tabId === undefined) return
 
-  void sendBatchToProcessText({ url: message.url, batch: message.batch })
-
-  console.info('[gloss+1] extraction batch received:', {
+  runPlaceholderPipeline({
+    tabId,
+    url: message.url,
     reason: message.reason,
-    batchBlocks: message.batch.stats.batchBlocks,
-    batchChars: message.batch.stats.batchChars,
+    blocks: message.batch.blocks,
   })
 }
 
@@ -126,10 +44,74 @@ function handleExtractionResult(
   result: ExtractionResult,
   sender: chrome.runtime.MessageSender,
 ): void {
-  const tabUrl = sender.tab?.url ?? 'unknown-tab'
-  console.info('[gloss+1] extraction received in service worker:', {
-    tabUrl,
+  const tabId = sender.tab?.id
+  if (tabId === undefined) return
+
+  runPlaceholderPipeline({
+    tabId,
+    url: result.url,
     reason,
-    result,
+    blocks: result.blocks,
   })
+}
+
+function runPlaceholderPipeline(payload: {
+  tabId: number
+  url: string
+  reason: string
+  blocks: TextBlock[]
+}): void {
+  const response = createPlaceholderPipelineResponse(payload.blocks)
+  const editCount = response.blocks.reduce((count, block) => count + block.edits.length, 0)
+
+  console.info('[gloss+1] placeholder pipeline response:', {
+    requestId: response.requestId,
+    url: payload.url,
+    reason: payload.reason,
+    blockCount: payload.blocks.length,
+    editCount,
+  })
+
+  if (editCount === 0) return
+
+  chrome.tabs.sendMessage(payload.tabId, {
+    type: PIPELINE_RESPONSE_MESSAGE,
+    response,
+  }).catch((error) => {
+    console.error('[gloss+1] failed to send pipeline response to content script:', error)
+  })
+}
+
+function createPlaceholderPipelineResponse(blocks: TextBlock[]): PipelineResponse {
+  const requestId = `placeholder-${Date.now()}-${Math.random().toString(36).slice(2)}`
+
+  return {
+    schemaVersion: 1,
+    requestId,
+    blocks: blocks.map((block) => ({
+      blockId: block.blockId,
+      edits: findStandaloneI(block).map((start, index) => ({
+        id: `${requestId}-${block.blockId}-${index}`,
+        start,
+        end: start + 1,
+        original: 'I',
+        replacement: 'Yo',
+        highlight: { level: 'medium' as const },
+        data: { source: 'placeholder-pipeline' },
+      })),
+    })).filter((block) => block.edits.length > 0),
+    data: { source: 'placeholder-pipeline' },
+  }
+}
+
+function findStandaloneI(block: TextBlock): number[] {
+  const starts: number[] = []
+  const pattern = /\bI\b/g
+  let match: RegExpExecArray | null
+
+  while ((match = pattern.exec(block.text)) !== null) {
+    starts.push(match.index)
+  }
+
+  return starts
 }

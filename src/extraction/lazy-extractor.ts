@@ -23,10 +23,10 @@ export class LazyExtractor {
 
   private extractedElements = new WeakSet<Element>()
   private extractedPaths = new Set<string>()
-  private extractedHashes = new Set<number>()
   private accumulatedBlocks: TextBlock[] = []
   private batchIndex = 0
   private cumulativeChars = 0
+  private nextSequence = 0
 
   constructor(
     config: Partial<LazyExtractionConfig> = {},
@@ -63,6 +63,7 @@ export class LazyExtractor {
     })
 
     this.mutationObserver.observe(root, {
+      characterData: true,
       childList: true,
       subtree: true,
     })
@@ -131,6 +132,15 @@ export class LazyExtractor {
     const seen = new Set<Element>()
 
     for (const mutation of mutations) {
+      if (mutation.type === 'characterData' && mutation.target.parentElement) {
+        const blocks = discoverBlockElements(mutation.target.parentElement)
+        for (const block of blocks) {
+          if (seen.has(block)) continue
+          seen.add(block)
+          discovered.push(block)
+        }
+      }
+
       for (const node of mutation.addedNodes) {
         if (!(node instanceof Element)) continue
 
@@ -150,12 +160,14 @@ export class LazyExtractor {
     this.processElements(
       discovered.filter((element) => this.isWithinViewportMargin(element)),
       'mutation',
+      true,
     )
   }
 
   private processElements(
     elements: Element[],
     trigger: ExtractionBatch['trigger'],
+    allowReprocess = false,
   ): void {
     if (!this.root || !this.intersectionObserver) return
 
@@ -163,7 +175,7 @@ export class LazyExtractor {
     let batchChars = 0
 
     for (const element of elements) {
-      if (this.extractedElements.has(element)) {
+      if (this.extractedElements.has(element) && !allowReprocess) {
         this.intersectionObserver.unobserve(element)
         continue
       }
@@ -173,16 +185,15 @@ export class LazyExtractor {
 
       if (!element.isConnected) continue
 
-      const block = extractBlockText(element, this.root)
+      const block = extractBlockText(element, this.root, this.nextSequence)
       if (!block || block.text.length < this.config.minBlockChars) continue
+      this.nextSequence += 1
 
-      const hash = hashText(block.text)
-      if (this.extractedPaths.has(block.path) || this.extractedHashes.has(hash)) {
+      if (this.extractedPaths.has(block.path) && !allowReprocess) {
         continue
       }
 
       this.extractedPaths.add(block.path)
-      this.extractedHashes.add(hash)
       this.accumulatedBlocks.push(block)
       this.cumulativeChars += block.text.length
       batchChars += block.text.length
@@ -226,22 +237,11 @@ export class LazyExtractor {
   private resetCaches(): void {
     this.extractedElements = new WeakSet<Element>()
     this.extractedPaths = new Set<string>()
-    this.extractedHashes = new Set<number>()
     this.accumulatedBlocks = []
     this.batchIndex = 0
     this.cumulativeChars = 0
+    this.nextSequence = 0
   }
-}
-
-function hashText(text: string): number {
-  let hash = 2166136261
-
-  for (let index = 0; index < text.length; index += 1) {
-    hash ^= text.charCodeAt(index)
-    hash = Math.imul(hash, 16777619)
-  }
-
-  return hash >>> 0
 }
 
 function parseRootMargin(rootMargin: string): {

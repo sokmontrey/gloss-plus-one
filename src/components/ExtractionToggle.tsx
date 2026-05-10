@@ -5,6 +5,7 @@ import { isSiteEnabled, setSiteEnabled } from '@/lib/settings'
 
 const SHOW_MANUAL_EXTRACT = import.meta.env.DEV
 const MANUAL_EXTRACT_MESSAGE = 'gloss-plus-one:manual-extract'
+const CONTENT_SCRIPT_RETRY_DELAYS_MS = [50, 150, 300, 600]
 
 type ManualExtractionResponse =
   | { ok: true; url: string; totalBlocks: number; totalChars: number }
@@ -76,7 +77,7 @@ export function ExtractionToggle() {
         throw new Error('No active browser tab found')
       }
 
-      const response = await chrome.tabs.sendMessage(tab.id, { type: MANUAL_EXTRACT_MESSAGE }) as ManualExtractionResponse | undefined
+      const response = await requestManualExtraction(tab.id)
       if (!response) {
         throw new Error('No response from content script')
       }
@@ -121,7 +122,7 @@ export function ExtractionToggle() {
           variant="outline"
           size="sm"
           className="w-full gap-2"
-          disabled={loading || saving || extracting}
+          disabled={loading || saving || extracting || !host}
           onClick={handleManualExtract}
         >
           {extracting && <Spinner size="sm" />}
@@ -142,4 +143,59 @@ export function ExtractionToggle() {
 async function getActiveTab(): Promise<chrome.tabs.Tab | undefined> {
   const tabs = await chrome.tabs.query({ active: true, currentWindow: true })
   return tabs[0]
+}
+
+async function requestManualExtraction(tabId: number): Promise<ManualExtractionResponse | undefined> {
+  try {
+    return await sendManualExtractionMessage(tabId)
+  } catch (error) {
+    if (!isMissingContentScriptError(error)) throw error
+  }
+
+  await injectContentScript(tabId)
+  return await retryManualExtractionMessage(tabId)
+}
+
+async function sendManualExtractionMessage(tabId: number): Promise<ManualExtractionResponse | undefined> {
+  return await chrome.tabs.sendMessage(tabId, { type: MANUAL_EXTRACT_MESSAGE }) as ManualExtractionResponse | undefined
+}
+
+async function injectContentScript(tabId: number): Promise<void> {
+  const contentScriptFile = chrome.runtime.getManifest().content_scripts?.[0]?.js?.[0]
+  if (!contentScriptFile) {
+    throw new Error('Content script is not listed in the extension manifest')
+  }
+
+  await chrome.scripting.executeScript({
+    target: { tabId },
+    files: [contentScriptFile],
+  })
+}
+
+async function retryManualExtractionMessage(tabId: number): Promise<ManualExtractionResponse | undefined> {
+  let lastError: unknown
+
+  for (const delayMs of CONTENT_SCRIPT_RETRY_DELAYS_MS) {
+    await delay(delayMs)
+
+    try {
+      return await sendManualExtractionMessage(tabId)
+    } catch (error) {
+      if (!isMissingContentScriptError(error)) throw error
+      lastError = error
+    }
+  }
+
+  throw lastError instanceof Error
+    ? lastError
+    : new Error('Content script did not start. Refresh the page and try again.')
+}
+
+function isMissingContentScriptError(error: unknown): boolean {
+  return error instanceof Error
+    && error.message.includes('Could not establish connection. Receiving end does not exist.')
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => window.setTimeout(resolve, ms))
 }

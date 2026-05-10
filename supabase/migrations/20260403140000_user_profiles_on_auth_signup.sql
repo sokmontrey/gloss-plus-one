@@ -8,12 +8,11 @@ SECURITY DEFINER
 SET search_path = public
 AS $$
 BEGIN
-  INSERT INTO public.user_profiles (user_id, email, name, avatar_url)
+  INSERT INTO public.user_profiles (user_id, email, name)
   VALUES (
     NEW.id,
     COALESCE(NEW.email, ''),
-    NULLIF(TRIM(COALESCE(NEW.raw_user_meta_data->>'full_name', NEW.raw_user_meta_data->>'name', '')), ''),
-    NULLIF(TRIM(COALESCE(NEW.raw_user_meta_data->>'avatar_url', NEW.raw_user_meta_data->>'picture', '')), '')
+    NULLIF(TRIM(COALESCE(NEW.raw_user_meta_data->>'full_name', NEW.raw_user_meta_data->>'name', '')), '')
   )
   ON CONFLICT (user_id) DO NOTHING;
 

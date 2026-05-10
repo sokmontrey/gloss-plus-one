@@ -3,6 +3,8 @@ export { discoverBlockElements, extractBlockText, extractPageText } from './text
 export type {
   ExtractionBatch,
   ExtractionResult,
+  InlineEdit,
   LazyExtractionConfig,
+  PipelineResponse,
   TextBlock,
 } from './types'
