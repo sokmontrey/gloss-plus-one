@@ -1,8 +1,16 @@
-import type { ExtractionBatch, ExtractionResult, PipelineResponse, TextBlock } from '@/extraction'
+import type {
+  ExtractionBatch,
+  ExtractionResult,
+  PipelineResponse,
+  TextBlock,
+} from '@/extraction'
+import { getSupabase } from '@/lib/supabase'
 
 const EXTRACTION_RESULT_MESSAGE = 'gloss-plus-one:extraction-result'
 const EXTRACTION_BATCH_MESSAGE = 'gloss-plus-one:extraction-batch'
 const PIPELINE_RESPONSE_MESSAGE = 'gloss-plus-one:pipeline-response'
+
+const PIPELINE_FUNCTION_NAME = 'replace-pipeline' as const
 
 console.info('[gloss+1] service worker started')
 
@@ -10,28 +18,27 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (!message) return undefined
 
   if (message.type === EXTRACTION_BATCH_MESSAGE) {
-    handleExtractionBatch(message, sender)
-    sendResponse({ ok: true })
-    return false
+    void handleExtractionBatch(message, sender).then(() => sendResponse({ ok: true }))
+    return true
   }
 
   if (message.type === EXTRACTION_RESULT_MESSAGE) {
-    handleExtractionResult(message.reason, message.result, sender)
-    sendResponse({ ok: true })
-    return false
+    void handleExtractionResult(message.reason, message.result, sender).then(() =>
+      sendResponse({ ok: true }))
+    return true
   }
 
   return undefined
 })
 
-function handleExtractionBatch(
+async function handleExtractionBatch(
   message: { reason: string; batch: ExtractionBatch; url: string },
   sender: chrome.runtime.MessageSender,
-): void {
+): Promise<void> {
   const tabId = sender.tab?.id
   if (tabId === undefined) return
 
-  runPlaceholderPipeline({
+  await runPipelineFromEdge({
     tabId,
     url: message.url,
     reason: message.reason,
@@ -39,15 +46,15 @@ function handleExtractionBatch(
   })
 }
 
-function handleExtractionResult(
+async function handleExtractionResult(
   reason: string,
   result: ExtractionResult,
   sender: chrome.runtime.MessageSender,
-): void {
+): Promise<void> {
   const tabId = sender.tab?.id
   if (tabId === undefined) return
 
-  runPlaceholderPipeline({
+  await runPipelineFromEdge({
     tabId,
     url: result.url,
     reason,
@@ -55,16 +62,17 @@ function handleExtractionResult(
   })
 }
 
-function runPlaceholderPipeline(payload: {
+async function runPipelineFromEdge(payload: {
   tabId: number
   url: string
   reason: string
   blocks: TextBlock[]
-}): void {
-  const response = createPlaceholderPipelineResponse(payload.blocks)
-  const editCount = response.blocks.reduce((count, block) => count + block.edits.length, 0)
+}): Promise<void> {
+  const response = await fetchPipelineResponse(payload)
+  if (!response) return
 
-  console.info('[gloss+1] placeholder pipeline response:', {
+  const editCount = response.blocks.reduce((count, block) => count + block.edits.length, 0)
+  console.info('[gloss+1] pipeline edge response:', {
     requestId: response.requestId,
     url: payload.url,
     reason: payload.reason,
@@ -82,36 +90,46 @@ function runPlaceholderPipeline(payload: {
   })
 }
 
-function createPlaceholderPipelineResponse(blocks: TextBlock[]): PipelineResponse {
-  const requestId = `placeholder-${Date.now()}-${Math.random().toString(36).slice(2)}`
+async function fetchPipelineResponse(payload: {
+  url: string
+  reason: string
+  blocks: TextBlock[]
+}): Promise<PipelineResponse | null> {
+  const supabase = getSupabase()
+  if (!supabase) {
+    console.warn('[gloss+1] pipeline skipped — Supabase env not configured')
+    return null
+  }
 
-  return {
-    schemaVersion: 1,
-    requestId,
-    blocks: blocks.map((block) => ({
-      blockId: block.blockId,
-      edits: findStandaloneI(block).map((start, index) => ({
-        id: `${requestId}-${block.blockId}-${index}`,
-        start,
-        end: start + 1,
-        original: 'I',
-        replacement: 'Yo',
-        highlight: { level: 'medium' as const },
-        data: { source: 'placeholder-pipeline' },
+  const { data: { session } } = await supabase.auth.getSession()
+  if (!session) {
+    console.warn('[gloss+1] pipeline skipped — no auth session')
+    return null
+  }
+
+  const { data, error } = await supabase.functions.invoke<
+    PipelineResponse
+  >(PIPELINE_FUNCTION_NAME, {
+    body: {
+      schemaVersion: 1,
+      url: payload.url,
+      reason: payload.reason,
+      blocks: payload.blocks.map((block) => ({
+        blockId: block.blockId,
+        text: block.text,
       })),
-    })).filter((block) => block.edits.length > 0),
-    data: { source: 'placeholder-pipeline' },
-  }
-}
+    },
+  })
 
-function findStandaloneI(block: TextBlock): number[] {
-  const starts: number[] = []
-  const pattern = /\bI\b/g
-  let match: RegExpExecArray | null
-
-  while ((match = pattern.exec(block.text)) !== null) {
-    starts.push(match.index)
+  if (error) {
+    console.error('[gloss+1] edge pipeline invoke failed:', error)
+    return null
   }
 
-  return starts
+  if (!data || typeof data !== 'object' || data.schemaVersion !== 1) {
+    console.error('[gloss+1] edge pipeline returned invalid body')
+    return null
+  }
+
+  return data
 }
