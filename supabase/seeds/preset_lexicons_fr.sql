@@ -1,0 +1,1 @@
+../../data-prep/sql/seed_preset_lexicons_fr.sql

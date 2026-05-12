@@ -62,7 +62,8 @@ schema_paths = []
 enabled = true
 # Specifies an ordered list of seed files to load during db reset.
 # Supports glob patterns relative to supabase directory: "./seeds/*.sql"
-sql_paths = ["./seed.sql"]
+# preset_lexicons_fr.sql is a symlink → ../../data-prep/sql/seed_preset_lexicons_fr.sql
+sql_paths = ["./seed.sql", "./seeds/preset_lexicons_fr.sql"]
 
 [db.network_restrictions]
 # Enable management of network restrictions.
