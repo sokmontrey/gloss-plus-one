@@ -1,7 +1,7 @@
 import type { Session, SupabaseClient } from '@supabase/supabase-js'
 
 /** Default `user_profiles.target_language` (matches DB default + signup trigger). */
-export const DEFAULT_TARGET_LANGUAGE = 'es' as const
+export const DEFAULT_TARGET_LANGUAGE = 'fr' as const
 
 export type UserProfile = {
   user_id: string
@@ -15,6 +15,24 @@ function trimToNull(value: unknown): string | null {
   if (typeof value !== 'string') return null
   const t = value.trim()
   return t.length > 0 ? t : null
+}
+
+/** FK / FK-style failures when ensuring profile row (auth.users row deleted, orphan client session). */
+export function isOrphanAuthProfileError(err: unknown): boolean {
+  if (typeof err !== 'object' || err === null) return false
+
+  const code = (err as { code?: unknown }).code
+  if (code !== undefined && String(code) === '23503') return true
+
+  const msg = (err as { message?: unknown }).message
+  if (typeof msg === 'string') {
+    if (/violates foreign key constraint/i.test(msg)) return true
+    const details = (err as { details?: unknown }).details
+    const det = typeof details === 'string' ? details : ''
+    if (det.includes('user_profiles_user_id_fkey') || msg.includes('user_profiles_user_id_fkey')) return true
+  }
+
+  return false
 }
 
 /**

@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
 import type { Session, SupabaseClient, User } from '@supabase/supabase-js'
+import { clearLocalAuthSession } from '@/lib/auth'
 import { getSupabase } from '@/lib/supabase'
-import { loadUserProfileWithEnsure, type UserProfile } from '@/lib/user-profile'
+import { isOrphanAuthProfileError, loadUserProfileWithEnsure, type UserProfile } from '@/lib/user-profile'
 
 export type AuthState = {
   session: Session | null
@@ -71,6 +72,21 @@ export function useAuth(): AuthState {
           })
         }
       } catch (err) {
+        if (isOrphanAuthProfileError(err)) {
+          console.warn('[gloss+1] profile ensure failed — auth user missing; clearing stale session')
+          await clearLocalAuthSession()
+          if (!cancelled) {
+            setState({
+              session: null,
+              user: null,
+              profile: null,
+              loading: false,
+              profileError: null,
+            })
+          }
+          return
+        }
+
         console.error('[gloss+1] user_profiles load failed:', err)
         const message = err instanceof Error ? err.message : 'Could not load profile'
         if (!cancelled) {
