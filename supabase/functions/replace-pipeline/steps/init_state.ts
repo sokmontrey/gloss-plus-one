@@ -8,7 +8,7 @@ export function initBlockState(block: PipelineBlockIn): BlockConfidenceState {
     tokens: [],
     lookupKeys: [],
     perWordTranslation: [],
-    contextReplaceability: [],
+    contextRecoverability: [],
     userConfidentScore: [],
     presetConfidentScore: [],
     firstPassConfident: [],

@@ -21,7 +21,7 @@ export async function tokenizeBlock(
     tokens,
     lookupKeys,
     perWordTranslation: Array(n).fill(""),
-    contextReplaceability: Array(n).fill(0),
+    contextRecoverability: Array(n).fill(0),
     userConfidentScore: Array(n).fill(0),
     presetConfidentScore: Array(n).fill(0),
     firstPassConfident: Array(n).fill(0),

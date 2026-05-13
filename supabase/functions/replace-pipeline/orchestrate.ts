@@ -8,7 +8,7 @@ import { initBlockState } from "./steps/init_state.ts"
 import { preprocessBlock } from "./steps/preprocess.ts"
 import { tokenizeBlock } from "./steps/tokenize.ts"
 import { translateWords } from "./steps/translate_words.ts"
-import { contextReplaceabilityScores } from "./steps/context_replaceability.ts"
+import { contextRecoverabilityScores } from "./steps/context_recoverability.ts"
 import { userConfidentLookup } from "./steps/user_confident_lookup.ts"
 import { presetLexiconConfidentLookup } from "./steps/preset_lexicon_confident_lookup.ts"
 import { firstPassConfidentScores } from "./steps/first_pass_confident.ts"
@@ -56,7 +56,7 @@ export async function runModularPipeline(
     s = await preprocessBlock(s, ctx)
     s = await tokenizeBlock(s, ctx)
     s = await translateWords(s, ctx)
-    s = await contextReplaceabilityScores(s, ctx)
+    s = await contextRecoverabilityScores(s, ctx)
     s = await userConfidentLookup(s, ctx)
     s = await presetLexiconConfidentLookup(s, ctx)
     s = await firstPassConfidentScores(s, ctx)

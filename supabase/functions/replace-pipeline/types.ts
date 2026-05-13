@@ -50,7 +50,7 @@ export type BlockConfidenceState = {
   /** NFKC/lowercase keyed for DB rows; aligns with tokens[] */
   lookupKeys: string[]
   perWordTranslation: string[]
-  contextReplaceability: number[]
+  contextRecoverability: number[]
   userConfidentScore: number[]
   presetConfidentScore: number[]
   firstPassConfident: number[]
