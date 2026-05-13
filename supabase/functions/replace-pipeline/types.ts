@@ -70,6 +70,8 @@ export type PipelineContext = {
   presetSlices: PresetSlices
   /** Normalized keys already inserted earlier this invoke (cross lazy blocks) */
   persistedLexiconKeysThisInvoke: Set<string>
+  /** From `user_progressions` vs env — set once per pipeline invoke. */
+  resolvedReplaceThreshold: number
   url?: string
   reason?: string
 }

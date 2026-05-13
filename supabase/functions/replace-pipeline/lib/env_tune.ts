@@ -69,16 +69,6 @@ export function recoverabilityScorePath(): string {
   return p.startsWith("/") ? p : `/${p}`
 }
 
-/** Per-language ENV `REPLACE_THRESHOLD_FR` overrides global `REPLACE_THRESHOLD`. */
-export function thresholdForLanguage(lang: string): number {
-  const spec = lang ? Deno.env.get(`REPLACE_THRESHOLD_${lang.toUpperCase()}`) : undefined
-  if (spec !== undefined && Number.isFinite(Number(spec))) return Number(spec)
-
-  const global = Deno.env.get("REPLACE_THRESHOLD")
-  if (global?.length && Number.isFinite(Number(global))) return Number(global)
-
-  return 0.42
-}
 
 export function highlightLevelFromCombined(score: number): "low" | "medium" | "high" {
   if (score >= 0.66) return "high"

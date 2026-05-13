@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js"
+import { resolveReplaceThreshold } from "./lib/replace_threshold.ts"
 import { fetchUserTargetLanguage } from "./lib/profile_lang.ts"
 import {
   loadPresetSlicesForLanguage,
@@ -34,12 +35,15 @@ export async function runModularPipeline(
     console.warn("[replace-pipeline] preset_lexicons prefetch failed:", e)
   }
 
+  const resolvedReplaceThreshold = await resolveReplaceThreshold(supabase, userId)
+
   const ctxShared: Omit<PipelineContext, "requestId"> = {
     userId,
     supabase,
     targetLanguage,
     presetSlices,
     persistedLexiconKeysThisInvoke: new Set<string>(),
+    resolvedReplaceThreshold,
     url: request.url,
     reason: request.reason,
   }
