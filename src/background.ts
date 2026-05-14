@@ -32,7 +32,7 @@ function handleExtractionBatch(
     reason: message.reason,
     blockCount: message.batch.blocks.length,
   })
-  // TODO: forward to pipeline edge function once contract is defined
+  // TODO: call replacement edge function
 }
 
 function handleExtractionResult(
@@ -45,5 +45,5 @@ function handleExtractionResult(
     reason,
     blockCount: result.blocks.length,
   })
-  // TODO: forward to pipeline edge function once contract is defined
+  // TODO: call replacement edge function
 }
