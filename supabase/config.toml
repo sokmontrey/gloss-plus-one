@@ -62,8 +62,7 @@ schema_paths = []
 enabled = true
 # Specifies an ordered list of seed files to load during db reset.
 # Supports glob patterns relative to supabase directory: "./seeds/*.sql"
-# preset_lexicons_fr.sql is a symlink → ../../data-prep/sql/seed_preset_lexicons_fr.sql
-sql_paths = ["./seed.sql", "./seeds/preset_lexicons_fr.sql"]
+sql_paths = ["./seed.sql"]
 
 [db.network_restrictions]
 # Enable management of network restrictions.
@@ -324,8 +323,8 @@ email_optional = false
 # Local Google OAuth: set enabled = true and add client id/secret to root .env (see .env.example).
 [auth.external.google]
 enabled = true
-client_id = "env(SUPABASE_AUTH_EXTERNAL_GOOGLE_CLIENT_ID)"
-secret = "env(SUPABASE_AUTH_EXTERNAL_GOOGLE_SECRET)"
+client_id = "env(SB_GOOGLE_CLIENT_ID)"
+secret = "env(SB_GOOGLE_SECRET)"
 redirect_uri = ""
 # Local Google sign-in often fails nonce validation without this; set false when you move off localhost.
 skip_nonce_check = true
@@ -400,13 +399,3 @@ s3_access_key = "env(S3_ACCESS_KEY)"
 # Configures AWS_SECRET_ACCESS_KEY for S3 bucket
 s3_secret_key = "env(S3_SECRET_KEY)"
 
-[functions.replace-pipeline]
-enabled = true
-verify_jwt = true
-import_map = "./functions/replace-pipeline/deno.json"
-# Uncomment to specify a custom file path to the entrypoint.
-# Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
-entrypoint = "./functions/replace-pipeline/index.ts"
-# Specifies static files to be bundled with the function. Supports glob patterns.
-# For example, if you want to serve static HTML pages in your function:
-# static_files = [ "./functions/replace-pipeline/*.html" ]

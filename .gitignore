@@ -1,7 +1,9 @@
 node_modules
 dist
+
 .env
 .env.local
+supabase/functions/.env
 node_modules/.tmp
 
 # Taskplane runtime artifacts (machine-specific, do not commit)
