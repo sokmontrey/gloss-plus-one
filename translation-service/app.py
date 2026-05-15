@@ -1,9 +1,24 @@
 import asyncio
+from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from pydantic import BaseModel
 from translator import translate_text, align_sentences, map_lexicons
+from model_loader import get_model, get_aligner, SUPPORTED_PAIRS
 
-app = FastAPI()
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    print("[translation] loading models...")
+    for pair in SUPPORTED_PAIRS:
+        print(f"[translation] loading {pair}...")
+        get_model(pair)
+    print("[translation] loading aligner...")
+    get_aligner()
+    print("[translation] ready")
+    yield
+
+
+app = FastAPI(lifespan=lifespan)
 
 # MarianMT is not thread-safe — serialize inference requests
 _inference_lock = asyncio.Lock()

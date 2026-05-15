@@ -20,6 +20,7 @@ const NAVIGATION_EVENT = 'gloss-plus-one:navigation'
 const MANUAL_EXTRACT_MESSAGE = 'gloss-plus-one:manual-extract'
 const EXTRACTION_BATCH_MESSAGE = 'gloss-plus-one:extraction-batch'
 const PIPELINE_RESPONSE_MESSAGE = 'gloss-plus-one:pipeline-response'
+const CANCEL_PIPELINE_MESSAGE = 'gloss-plus-one:cancel-pipeline'
 
 type ManualExtractionResponse =
   | { ok: true; url: string; totalBlocks: number; totalChars: number }
@@ -34,6 +35,16 @@ let lastLazyStartUrl: string | null = null
 let activeExtractor: LazyExtractor | null = null
 const blockRegistry = new Map<string, TextBlock>()
 
+let totalBlocksSent = 0
+let doneBlocks = 0
+let progressArc: SVGCircleElement | null = null
+let progressSvg: SVGSVGElement | null = null
+
+// Scanning sweep state
+let scanStyleInjected = false
+const scanningElements = new Map<string, Element>() // blockId → element
+const pendingBatchIds: string[][] = [] // FIFO queue of in-flight batch blockId arrays
+
 const contentWindow = window as typeof window & {
   __glossPlusOneContentLoaded?: boolean
   __glossPlusOneHistoryPatched?: boolean
@@ -43,6 +54,129 @@ function extensionStylesheetHref(url: string): string {
   if (url.startsWith('chrome-extension://')) return url
   const path = url.startsWith('/') ? url.slice(1) : url
   return chrome.runtime.getURL(path)
+}
+
+// Circumference of r=15.9 ≈ 100, so stroke-dasharray=100 maps directly to percentage
+const PROGRESS_CIRCUMFERENCE = 100
+
+function createProgressIndicator(shadow: ShadowRoot): void {
+  const style = document.createElement('style')
+  style.textContent = '@keyframes gloss-track-pulse{0%,100%{opacity:0.2}50%{opacity:0.55}}'
+  shadow.append(style)
+
+  const ns = 'http://www.w3.org/2000/svg'
+  const svg = document.createElementNS(ns, 'svg') as SVGSVGElement
+  svg.setAttribute('viewBox', '0 0 36 36')
+  svg.setAttribute('width', '22')
+  svg.setAttribute('height', '22')
+  svg.style.cssText = 'display:none;filter:drop-shadow(0 0 4px rgba(99,179,237,0.6));'
+
+  // Faint pulsing track shows the "loading remainder"
+  const track = document.createElementNS(ns, 'circle') as SVGCircleElement
+  track.setAttribute('cx', '18')
+  track.setAttribute('cy', '18')
+  track.setAttribute('r', '15.9')
+  track.setAttribute('fill', 'none')
+  track.setAttribute('stroke', 'rgba(99,179,237,0.25)')
+  track.setAttribute('stroke-width', '3.2')
+  track.setAttribute('transform', 'rotate(-90 18 18)')
+  track.style.cssText = 'animation:gloss-track-pulse 1.4s ease-in-out infinite;'
+
+  // Progress arc fills clockwise from 12 o'clock (top)
+  const arc = document.createElementNS(ns, 'circle') as SVGCircleElement
+  arc.setAttribute('cx', '18')
+  arc.setAttribute('cy', '18')
+  arc.setAttribute('r', '15.9')
+  arc.setAttribute('fill', 'none')
+  arc.setAttribute('stroke', '#63b3ed')
+  arc.setAttribute('stroke-width', '3.2')
+  arc.setAttribute('stroke-linecap', 'round')
+  arc.setAttribute('stroke-dasharray', `${PROGRESS_CIRCUMFERENCE} ${PROGRESS_CIRCUMFERENCE}`)
+  arc.setAttribute('stroke-dashoffset', `${PROGRESS_CIRCUMFERENCE}`)
+  arc.setAttribute('transform', 'rotate(-90 18 18)')
+  arc.style.cssText = 'transition:stroke-dashoffset 0.35s ease;'
+
+  svg.append(track, arc)
+  shadow.append(svg)
+
+  progressSvg = svg
+  progressArc = arc
+}
+
+function updateProgress(): void {
+  if (!progressSvg || !progressArc) return
+  if (totalBlocksSent === 0 || doneBlocks >= totalBlocksSent) {
+    progressSvg.style.display = 'none'
+    return
+  }
+  progressSvg.style.display = 'block'
+  const pct = Math.min(1, doneBlocks / totalBlocksSent)
+  progressArc.setAttribute('stroke-dashoffset', `${PROGRESS_CIRCUMFERENCE * (1 - pct)}`)
+}
+
+function cancelPipelineAndReset(): void {
+  totalBlocksSent = 0
+  doneBlocks = 0
+  updateProgress()
+  stopAllScanning()
+  void chrome.runtime.sendMessage({ type: CANCEL_PIPELINE_MESSAGE }).catch(() => {})
+}
+
+// ── Scanning sweep ─────────────────────────────────────────────────────────────
+
+function ensureScanStyle(): void {
+  if (scanStyleInjected) return
+  scanStyleInjected = true
+  const style = document.createElement('style')
+  style.textContent = `
+@keyframes gloss-sweep {
+  0%   { transform: translateX(-150%); }
+  100% { transform: translateX(350%); }
+}
+.gloss-scanning {
+  position: relative !important;
+  overflow: hidden !important;
+}
+.gloss-scanning::after {
+  content: '' !important;
+  position: absolute !important;
+  inset: 0 !important;
+  width: 45% !important;
+  background: linear-gradient(90deg, transparent, rgba(99,179,237,0.18), transparent) !important;
+  animation: gloss-sweep 1.6s ease-in-out infinite !important;
+  pointer-events: none !important;
+  border-radius: inherit !important;
+}`.trim()
+  document.head.append(style)
+}
+
+function startScanning(blocks: TextBlock[]): void {
+  ensureScanStyle()
+  for (const block of blocks) {
+    const el = resolveElementPath(block.path)
+    if (el) {
+      el.classList.add('gloss-scanning')
+      scanningElements.set(block.blockId, el)
+    }
+  }
+}
+
+function stopScanning(blockIds: string[]): void {
+  for (const id of blockIds) {
+    const el = scanningElements.get(id)
+    if (el) {
+      el.classList.remove('gloss-scanning')
+      scanningElements.delete(id)
+    }
+  }
+}
+
+function stopAllScanning(): void {
+  for (const el of scanningElements.values()) {
+    el.classList.remove('gloss-scanning')
+  }
+  scanningElements.clear()
+  pendingBatchIds.length = 0
 }
 
 initializeContentScript()
@@ -58,7 +192,7 @@ function initializeContentScript(): void {
     all: 'initial',
     position: 'fixed',
     right: '12px',
-    bottom: '12px',
+    top: '12px',
     zIndex: '2147483647',
   })
   document.documentElement.append(mount)
@@ -69,6 +203,7 @@ function initializeContentScript(): void {
   link.href = extensionStylesheetHref(contentStylesUrl)
   shadow.append(link)
   shadow.append(document.createElement('div'))
+  createProgressIndicator(shadow)
 
   patchHistoryMethods()
   registerManualExtractionListener()
@@ -92,6 +227,11 @@ function registerPipelineResponseListener(): void {
   chrome.runtime.onMessage.addListener((message) => {
     if (!message || message.type !== PIPELINE_RESPONSE_MESSAGE) return undefined
 
+    const inputCount = (message.inputBlockCount as number | undefined) ?? 0
+    doneBlocks = Math.min(totalBlocksSent, doneBlocks + inputCount)
+    updateProgress()
+    const batchIds = pendingBatchIds.shift()
+    if (batchIds) stopScanning(batchIds)
     applyPipelineResponse(message.response as PipelineResponse)
     return false
   })
@@ -111,6 +251,7 @@ function registerAutomaticExtractionListeners(): void {
     clearScheduledExtraction()
     stopUrlWatchers()
     stopLazyExtractor()
+    cancelPipelineAndReset()
   })
   window.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') {
@@ -216,6 +357,7 @@ function checkForUrlChange(reason: string): void {
   lastObservedUrl = currentUrl
   lastLazyStartUrl = null
   stopLazyExtractor()
+  cancelPipelineAndReset()
   scheduleExtraction(`url-change-${reason}`)
 }
 
@@ -526,6 +668,10 @@ async function forwardBatchToBackground(reason: string, batch: ExtractionBatch):
     joinedText: batch.blocks.map((b) => b.text).join('\n'),
     batch,
   })
+  totalBlocksSent += batch.blocks.length
+  updateProgress()
+  startScanning(batch.blocks)
+  pendingBatchIds.push(batch.blocks.map((b) => b.blockId))
   try {
     await chrome.runtime.sendMessage({
       type: EXTRACTION_BATCH_MESSAGE,
@@ -535,6 +681,10 @@ async function forwardBatchToBackground(reason: string, batch: ExtractionBatch):
     })
   } catch (error) {
     console.error('[gloss+1] failed to forward extraction batch to service worker:', error)
+    totalBlocksSent = Math.max(doneBlocks, totalBlocksSent - batch.blocks.length)
+    updateProgress()
+    const ids = pendingBatchIds.pop()
+    if (ids) stopScanning(ids)
   }
 }
 

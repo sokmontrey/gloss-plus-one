@@ -120,6 +120,7 @@ export class LazyExtractor {
   ): void {
     const visibleEntries = entries
       .filter((entry) => entry.isIntersecting)
+      .sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top)
       .map((entry) => entry.target)
       .filter((target): target is Element => target instanceof Element)
 
@@ -252,12 +253,15 @@ export class LazyExtractor {
         return true
       }
     }
-    // characterData mutations inside our edit spans
+
     if (mutation.type === 'characterData' && mutation.target.parentElement) {
-      if (mutation.target.parentElement.closest('[data-gloss-plus-one-edit-id]')) {
-        return true
-      }
+      const parent = mutation.target.parentElement
+      // Inside one of our edit spans
+      if (parent.closest('[data-gloss-plus-one-edit-id]')) return true
+      // Text node sibling of our edit spans — fired by range.deleteContents() when applying an edit
+      if (parent.querySelector('[data-gloss-plus-one-edit-id]')) return true
     }
+
     return false
   }
 

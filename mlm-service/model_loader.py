@@ -1,8 +1,9 @@
+import os
 import threading
 import torch
 from transformers import AutoTokenizer, AutoModelForMaskedLM
 
-MODEL_NAME = "distilbert-base-uncased"
+MODEL_NAME = os.environ.get("MLM_MODEL", "distilbert-base-uncased")
 
 _tokenizer = None
 _model = None

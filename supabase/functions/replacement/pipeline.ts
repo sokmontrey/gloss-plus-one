@@ -4,7 +4,8 @@ const LEXICON_URL = Deno.env.get("LEXICON_URL") ?? "http://localhost:8001"
 const TRANSLATION_URL = Deno.env.get("TRANSLATION_URL") ?? "http://localhost:8003"
 const MLM_URL = Deno.env.get("MLM_URL") ?? "http://localhost:8002"
 
-const SCORE_THRESHOLD = 0.95
+// Enough recoverable context for safe i+1 replacement
+const SCORE_THRESHOLD = 0.85
 
 // Replace function words — high-scoring ones are trivially recoverable from context,
 // making them safe candidates for i+1 grammar learning
@@ -33,7 +34,7 @@ interface TranslationItem {
   target: string | null
 }
 
-// ── Parallel fetch helpers ────────────────────────────────────────────────────
+// ── Fetch helpers ─────────────────────────────────────────────────────────────
 
 async function fetchLexicons(text: string): Promise<Lexicon[]> {
   const res = await fetch(`${LEXICON_URL}/split`, {
@@ -65,11 +66,14 @@ async function fetchTranslations(
   return data.translations
 }
 
-async function fetchMlmScores(text: string): Promise<MlmToken[]> {
+async function fetchMlmScores(
+  text: string,
+  includeRanges: Array<{ start: number; end: number }>,
+): Promise<MlmToken[]> {
   const res = await fetch(`${MLM_URL}/recoverable_score`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ text }),
+    body: JSON.stringify({ text, include_ranges: includeRanges }),
   })
   if (!res.ok) throw new Error(`mlm-service ${res.status}: ${await res.text()}`)
   const data = await res.json()
@@ -78,11 +82,6 @@ async function fetchMlmScores(text: string): Promise<MlmToken[]> {
 
 // ── Score mapping ─────────────────────────────────────────────────────────────
 
-/**
- * Compute the average MLM score for a lexicon span.
- * Only tokens with non-null scores that overlap [lexStart, lexEnd) are included.
- * Returns null if no scorable tokens overlap.
- */
 function lexiconScore(
   lexStart: number,
   lexEnd: number,
@@ -102,31 +101,35 @@ export async function runPipeline(
   text: string,
   targetLanguage: string,
 ): Promise<Replacement[]> {
-  // Step 1: split + MLM score in parallel (translation needs lexicons first)
-  const [lexicons, mlmTokens] = await Promise.all([
-    fetchLexicons(text),
-    fetchMlmScores(text),
-  ])
+  const t0 = Date.now()
 
-  // Step 2: translate only replaceable lexicons
+  // Step 1: get lexicons — needed to know which positions to score
+  const lexicons = await fetchLexicons(text)
+  console.info(`[pipeline] lexicons: ${Date.now() - t0}ms (${lexicons.length} items)`)
+
   const replaceableLexicons = lexicons.filter((l) => REPLACEABLE_TYPES.has(l.type))
-  const translations = replaceableLexicons.length > 0
-    ? await fetchTranslations(text, replaceableLexicons, targetLanguage)
-    : []
+  if (replaceableLexicons.length === 0) return []
 
-  // Step 3: build lookup maps
+  // Step 2: MLM (only function word positions) + translation in parallel.
+  // Passing include_ranges cuts scored tokens from ~150 to ~10-20.
+  const includeRanges = replaceableLexicons.map((l) => ({ start: l.start, end: l.end }))
+  const t1 = Date.now()
+
+  const [mlmTokens, translations] = await Promise.all([
+    fetchMlmScores(text, includeRanges),
+    fetchTranslations(text, replaceableLexicons, targetLanguage),
+  ])
+  console.info(`[pipeline] mlm+translate: ${Date.now() - t1}ms`)
+
+  // Step 3: build lookup map
   const translationById = new Map<number, string | null>(
     translations.map((t) => [t.id, t.target]),
   )
 
-  // Step 4: filter and build replacement edits
-  // Function words with high recoverability scores are safe to replace —
-  // the reader can infer their meaning from surrounding context
+  // Step 4: filter and build replacements
   const replacements: Replacement[] = []
 
-  for (const lex of lexicons) {
-    if (!REPLACEABLE_TYPES.has(lex.type)) continue
-
+  for (const lex of replaceableLexicons) {
     const score = lexiconScore(lex.start, lex.end, mlmTokens)
     if (score === null || score < SCORE_THRESHOLD) continue
 
@@ -142,5 +145,6 @@ export async function runPipeline(
     })
   }
 
+  console.info(`[pipeline] total: ${Date.now() - t0}ms → ${replacements.length} replacements`)
   return replacements
 }

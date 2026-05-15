@@ -108,6 +108,13 @@ def split(text: str) -> list[dict]:
             t_end = tokens[j].idx + len(tokens[j].text)
             j += 1
 
+        # Merge consecutive AUX tokens so multi-word auxiliaries like "would have",
+        # "has been", "could have" are treated as a single unit and translate correctly.
+        if token.pos_ == "AUX":
+            while j < len(tokens) and j not in skip_indices and tokens[j].pos_ == "AUX":
+                t_end = tokens[j].idx + len(tokens[j].text)
+                j += 1
+
         t_text = text[t_start:t_end]
 
         if _overlaps(t_start, t_end, occupied):

@@ -6,6 +6,35 @@ import { GoogleSignInButton } from '@/components/GoogleSignInButton'
 import { useAuth } from '@/hooks/useAuth'
 import { signOut } from '@/lib/auth'
 import { getSupabase } from '@/lib/supabase'
+import React from 'react'
+
+const CACHE_PREFIX = 'gloss:v1:'
+
+function ClearCacheButton() {
+  const [state, setState] = React.useState<'idle' | 'clearing' | 'done'>('idle')
+
+  async function handleClear() {
+    setState('clearing')
+    const all = await chrome.storage.local.get(null)
+    const keys = Object.keys(all).filter((k) => k.startsWith(CACHE_PREFIX))
+    if (keys.length > 0) await chrome.storage.local.remove(keys)
+    setState('done')
+    setTimeout(() => setState('idle'), 1500)
+  }
+
+  return (
+    <Button
+      type="button"
+      variant="ghost"
+      size="sm"
+      className="w-full text-xs text-muted-foreground"
+      disabled={state !== 'idle'}
+      onClick={handleClear}
+    >
+      {state === 'clearing' ? 'Clearing…' : state === 'done' ? 'Cache cleared' : 'Clear translation cache'}
+    </Button>
+  )
+}
 
 type AppProps = { variant?: 'popup' | 'content' }
 
@@ -61,6 +90,7 @@ export default function App({ variant = 'popup' }: AppProps) {
             >
               Sign out
             </Button>
+            <ClearCacheButton />
           </div>
         ) : (
           <GoogleSignInButton />
