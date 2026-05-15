@@ -163,7 +163,11 @@ export class LazyExtractor {
     }
 
     this.processElements(
-      discovered.filter((element) => this.isWithinViewportMargin(element)),
+      discovered.filter(
+        (element) =>
+          this.isWithinViewportMargin(element)
+          && !element.querySelector('[data-gloss-plus-one-edit-id]'),
+      ),
       'mutation',
       true,
     )

@@ -34,6 +34,7 @@ let lastManualExtractionUrl: string | null = null
 let lastLazyStartUrl: string | null = null
 let activeExtractor: LazyExtractor | null = null
 const blockRegistry = new Map<string, TextBlock>()
+const appliedBlockIds = new Set<string>()
 
 let totalBlocksSent = 0
 let doneBlocks = 0
@@ -117,6 +118,7 @@ function updateProgress(): void {
 function cancelPipelineAndReset(): void {
   totalBlocksSent = 0
   doneBlocks = 0
+  appliedBlockIds.clear()
   updateProgress()
   stopAllScanning()
   void chrome.runtime.sendMessage({ type: CANCEL_PIPELINE_MESSAGE }).catch(() => {})
@@ -490,6 +492,12 @@ function applyPipelineResponse(response: PipelineResponse): void {
   let skippedEdits = 0
 
   for (const blockResponse of response.blocks) {
+    if (appliedBlockIds.has(blockResponse.blockId)) {
+      console.info('[gloss+1] skipped already-applied block:', blockResponse.blockId)
+      skippedEdits += blockResponse.edits.length
+      continue
+    }
+
     const block = blockRegistry.get(blockResponse.blockId)
     if (!block) {
       console.warn('[gloss+1] skipped pipeline block with no registry entry:', blockResponse.blockId)
@@ -512,6 +520,15 @@ function applyPipelineResponse(response: PipelineResponse): void {
 
     const validEdits = getValidNonOverlappingEdits(currentBlock.text, blockResponse.edits)
     skippedEdits += blockResponse.edits.length - validEdits.length
+
+    console.info('[gloss+1] block edits:', {
+      blockId: blockResponse.blockId,
+      currentText: currentBlock.text.slice(0, 120),
+      rawEdits: blockResponse.edits.map((e) => `[${e.start}:${e.end}] "${e.original}" → "${e.replacement}"`),
+      validEdits: validEdits.map((e) => `[${e.start}:${e.end}] "${e.original}" → "${e.replacement}"`),
+    })
+
+    appliedBlockIds.add(blockResponse.blockId)
 
     for (const edit of validEdits.sort((a, b) => b.start - a.start)) {
       if (applyInlineEdit(element, currentBlock.text, edit)) {
