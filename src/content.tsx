@@ -1,0 +1,747 @@
+import type { Session } from '@supabase/supabase-js'
+import {
+  LazyExtractor,
+  extractBlockText,
+  extractPageText,
+  type ExtractionBatch,
+  type ExtractionResult,
+  type InlineEdit,
+  type PipelineResponse,
+  type TextBlock,
+} from '@/extraction'
+import { isSiteEnabled, clearLegacyKeys } from '@/lib/settings'
+import { getSupabase } from '@/lib/supabase'
+import contentStylesUrl from './index.css?url'
+
+const EXTRACTION_DEBOUNCE_MS = 900
+const SESSION_RETRY_DELAYS_MS = [0, 250, 500, 1000]
+const URL_WATCH_INTERVAL_MS = 1000
+const NAVIGATION_EVENT = 'gloss-plus-one:navigation'
+const MANUAL_EXTRACT_MESSAGE = 'gloss-plus-one:manual-extract'
+const EXTRACTION_BATCH_MESSAGE = 'gloss-plus-one:extraction-batch'
+const PIPELINE_RESPONSE_MESSAGE = 'gloss-plus-one:pipeline-response'
+const CANCEL_PIPELINE_MESSAGE = 'gloss-plus-one:cancel-pipeline'
+
+type ManualExtractionResponse =
+  | { ok: true; url: string; totalBlocks: number; totalChars: number }
+  | { ok: false; error: string }
+
+let extractionTimer: number | null = null
+let urlWatchTimer: number | null = null
+let urlObserver: MutationObserver | null = null
+let lastObservedUrl = window.location.href
+let lastManualExtractionUrl: string | null = null
+let lastLazyStartUrl: string | null = null
+let activeExtractor: LazyExtractor | null = null
+const blockRegistry = new Map<string, TextBlock>()
+const appliedBlockIds = new Set<string>()
+
+let totalBlocksSent = 0
+let doneBlocks = 0
+let progressArc: SVGCircleElement | null = null
+let progressSvg: SVGSVGElement | null = null
+
+// Scanning sweep state
+let scanStyleInjected = false
+const scanningElements = new Map<string, Element>() // blockId → element
+const pendingBatchIds: string[][] = [] // FIFO queue of in-flight batch blockId arrays
+
+const contentWindow = window as typeof window & {
+  __glossPlusOneContentLoaded?: boolean
+  __glossPlusOneHistoryPatched?: boolean
+}
+
+function extensionStylesheetHref(url: string): string {
+  if (url.startsWith('chrome-extension://')) return url
+  const path = url.startsWith('/') ? url.slice(1) : url
+  return chrome.runtime.getURL(path)
+}
+
+// Circumference of r=15.9 ≈ 100, so stroke-dasharray=100 maps directly to percentage
+const PROGRESS_CIRCUMFERENCE = 100
+
+function createProgressIndicator(shadow: ShadowRoot): void {
+  const style = document.createElement('style')
+  style.textContent = '@keyframes gloss-track-pulse{0%,100%{opacity:0.2}50%{opacity:0.55}}'
+  shadow.append(style)
+
+  const ns = 'http://www.w3.org/2000/svg'
+  const svg = document.createElementNS(ns, 'svg') as SVGSVGElement
+  svg.setAttribute('viewBox', '0 0 36 36')
+  svg.setAttribute('width', '22')
+  svg.setAttribute('height', '22')
+  svg.style.cssText = 'display:none;filter:drop-shadow(0 0 4px rgba(99,179,237,0.6));'
+
+  // Faint pulsing track shows the "loading remainder"
+  const track = document.createElementNS(ns, 'circle') as SVGCircleElement
+  track.setAttribute('cx', '18')
+  track.setAttribute('cy', '18')
+  track.setAttribute('r', '15.9')
+  track.setAttribute('fill', 'none')
+  track.setAttribute('stroke', 'rgba(99,179,237,0.25)')
+  track.setAttribute('stroke-width', '3.2')
+  track.setAttribute('transform', 'rotate(-90 18 18)')
+  track.style.cssText = 'animation:gloss-track-pulse 1.4s ease-in-out infinite;'
+
+  // Progress arc fills clockwise from 12 o'clock (top)
+  const arc = document.createElementNS(ns, 'circle') as SVGCircleElement
+  arc.setAttribute('cx', '18')
+  arc.setAttribute('cy', '18')
+  arc.setAttribute('r', '15.9')
+  arc.setAttribute('fill', 'none')
+  arc.setAttribute('stroke', '#63b3ed')
+  arc.setAttribute('stroke-width', '3.2')
+  arc.setAttribute('stroke-linecap', 'round')
+  arc.setAttribute('stroke-dasharray', `${PROGRESS_CIRCUMFERENCE} ${PROGRESS_CIRCUMFERENCE}`)
+  arc.setAttribute('stroke-dashoffset', `${PROGRESS_CIRCUMFERENCE}`)
+  arc.setAttribute('transform', 'rotate(-90 18 18)')
+  arc.style.cssText = 'transition:stroke-dashoffset 0.35s ease;'
+
+  svg.append(track, arc)
+  shadow.append(svg)
+
+  progressSvg = svg
+  progressArc = arc
+}
+
+function updateProgress(): void {
+  if (!progressSvg || !progressArc) return
+  if (totalBlocksSent === 0 || doneBlocks >= totalBlocksSent) {
+    progressSvg.style.display = 'none'
+    return
+  }
+  progressSvg.style.display = 'block'
+  const pct = Math.min(1, doneBlocks / totalBlocksSent)
+  progressArc.setAttribute('stroke-dashoffset', `${PROGRESS_CIRCUMFERENCE * (1 - pct)}`)
+}
+
+function cancelPipelineAndReset(): void {
+  totalBlocksSent = 0
+  doneBlocks = 0
+  appliedBlockIds.clear()
+  updateProgress()
+  stopAllScanning()
+  void chrome.runtime.sendMessage({ type: CANCEL_PIPELINE_MESSAGE }).catch(() => {})
+}
+
+// ── Scanning sweep ─────────────────────────────────────────────────────────────
+
+function ensureScanStyle(): void {
+  if (scanStyleInjected) return
+  scanStyleInjected = true
+  const style = document.createElement('style')
+  style.textContent = `
+@keyframes gloss-sweep {
+  0%   { transform: translateX(-150%); }
+  100% { transform: translateX(350%); }
+}
+.gloss-scanning {
+  position: relative !important;
+  overflow: hidden !important;
+}
+.gloss-scanning::after {
+  content: '' !important;
+  position: absolute !important;
+  inset: 0 !important;
+  width: 45% !important;
+  background: linear-gradient(90deg, transparent, rgba(99,179,237,0.18), transparent) !important;
+  animation: gloss-sweep 1.6s ease-in-out infinite !important;
+  pointer-events: none !important;
+  border-radius: inherit !important;
+}`.trim()
+  document.head.append(style)
+}
+
+function startScanning(blocks: TextBlock[]): void {
+  ensureScanStyle()
+  for (const block of blocks) {
+    const el = resolveElementPath(block.path)
+    if (el) {
+      el.classList.add('gloss-scanning')
+      scanningElements.set(block.blockId, el)
+    }
+  }
+}
+
+function stopScanning(blockIds: string[]): void {
+  for (const id of blockIds) {
+    const el = scanningElements.get(id)
+    if (el) {
+      el.classList.remove('gloss-scanning')
+      scanningElements.delete(id)
+    }
+  }
+}
+
+function stopAllScanning(): void {
+  for (const el of scanningElements.values()) {
+    el.classList.remove('gloss-scanning')
+  }
+  scanningElements.clear()
+  pendingBatchIds.length = 0
+}
+
+initializeContentScript()
+
+function initializeContentScript(): void {
+  if (contentWindow.__glossPlusOneContentLoaded) return
+  contentWindow.__glossPlusOneContentLoaded = true
+
+  const mount = document.createElement('div')
+  mount.id = 'gloss-plus-one-root'
+  mount.setAttribute('data-gloss-plus-one', '')
+  Object.assign(mount.style, {
+    all: 'initial',
+    position: 'fixed',
+    right: '12px',
+    top: '12px',
+    zIndex: '2147483647',
+  })
+  document.documentElement.append(mount)
+
+  const shadow = mount.attachShadow({ mode: 'open' })
+  const link = document.createElement('link')
+  link.rel = 'stylesheet'
+  link.href = extensionStylesheetHref(contentStylesUrl)
+  shadow.append(link)
+  shadow.append(document.createElement('div'))
+  createProgressIndicator(shadow)
+
+  patchHistoryMethods()
+  registerManualExtractionListener()
+  registerPipelineResponseListener()
+  registerAutomaticExtractionListeners()
+  registerStorageChangeListener()
+  primeInitialExtraction()
+  void clearLegacyKeys()
+}
+
+function registerManualExtractionListener(): void {
+  chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+    if (!message || message.type !== MANUAL_EXTRACT_MESSAGE) return undefined
+
+    void handleManualExtraction().then(sendResponse)
+    return true
+  })
+}
+
+function registerPipelineResponseListener(): void {
+  chrome.runtime.onMessage.addListener((message) => {
+    if (!message || message.type !== PIPELINE_RESPONSE_MESSAGE) return undefined
+
+    const inputCount = (message.inputBlockCount as number | undefined) ?? 0
+    doneBlocks = Math.min(totalBlocksSent, doneBlocks + inputCount)
+    updateProgress()
+    const batchIds = pendingBatchIds.shift()
+    if (batchIds) stopScanning(batchIds)
+    applyPipelineResponse(message.response as PipelineResponse)
+    return false
+  })
+}
+
+function registerAutomaticExtractionListeners(): void {
+  window.addEventListener(NAVIGATION_EVENT, () => scheduleExtraction('history-change'))
+  window.addEventListener('popstate', () => scheduleExtraction('popstate'))
+  window.addEventListener('hashchange', () => scheduleExtraction('hashchange'))
+  window.addEventListener('pageshow', () => {
+    lastObservedUrl = window.location.href
+    lastLazyStartUrl = null
+    ensureUrlWatchers()
+    scheduleExtraction('pageshow')
+  })
+  window.addEventListener('pagehide', () => {
+    clearScheduledExtraction()
+    stopUrlWatchers()
+    stopLazyExtractor()
+    cancelPipelineAndReset()
+  })
+  window.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+      checkForUrlChange('visibilitychange')
+      ensureUrlWatchers()
+      return
+    }
+
+    clearScheduledExtraction()
+  })
+
+  ensureUrlWatchers()
+}
+
+function primeInitialExtraction(): void {
+  lastObservedUrl = window.location.href
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => {
+      ensureUrlWatchers()
+      scheduleExtraction('dom-content-loaded')
+    }, { once: true })
+    return
+  }
+
+  ensureUrlWatchers()
+  scheduleExtraction('initial-load')
+}
+
+function patchHistoryMethods(): void {
+  if (contentWindow.__glossPlusOneHistoryPatched) {
+    return
+  }
+
+  contentWindow.__glossPlusOneHistoryPatched = true
+
+  const wrapHistoryMethod = <T extends 'pushState' | 'replaceState'>(methodName: T) => {
+    const original = history[methodName]
+
+    history[methodName] = function patchedHistoryMethod(this: History, ...args: Parameters<History[T]>) {
+      const result = original.apply(this, args)
+      window.dispatchEvent(new Event(NAVIGATION_EVENT))
+      return result
+    } as History[T]
+  }
+
+  wrapHistoryMethod('pushState')
+  wrapHistoryMethod('replaceState')
+}
+
+function registerStorageChangeListener(): void {
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area !== 'local') return
+    if (!('gloss-plus-one.extraction-sites' in changes)) return
+    void runExtraction('storage-change')
+  })
+}
+
+function scheduleExtraction(reason: string): void {
+  clearScheduledExtraction()
+
+  extractionTimer = window.setTimeout(() => {
+    extractionTimer = null
+    void runExtraction(reason)
+  }, EXTRACTION_DEBOUNCE_MS)
+}
+
+function clearScheduledExtraction(): void {
+  if (extractionTimer === null) return
+
+  window.clearTimeout(extractionTimer)
+  extractionTimer = null
+}
+
+function ensureUrlWatchers(): void {
+  if (urlWatchTimer === null) {
+    urlWatchTimer = window.setInterval(() => checkForUrlChange('interval'), URL_WATCH_INTERVAL_MS)
+  }
+
+  if (!urlObserver && document.documentElement) {
+    urlObserver = new MutationObserver(() => checkForUrlChange('mutation'))
+    urlObserver.observe(document.documentElement, {
+      childList: true,
+      subtree: true,
+    })
+  }
+}
+
+function stopUrlWatchers(): void {
+  if (urlWatchTimer !== null) {
+    window.clearInterval(urlWatchTimer)
+    urlWatchTimer = null
+  }
+
+  urlObserver?.disconnect()
+  urlObserver = null
+}
+
+function checkForUrlChange(reason: string): void {
+  const currentUrl = window.location.href
+  if (currentUrl === lastObservedUrl) return
+
+  lastObservedUrl = currentUrl
+  lastLazyStartUrl = null
+  stopLazyExtractor()
+  cancelPipelineAndReset()
+  scheduleExtraction(`url-change-${reason}`)
+}
+
+async function runExtraction(reason: string): Promise<void> {
+  const host = new URL(window.location.href).host
+  if (!(await isSiteEnabled(host))) {
+    lastLazyStartUrl = null
+    stopLazyExtractor()
+    return
+  }
+
+  const session = await getAuthedSession()
+  if (!session) return
+  if (!document.body) return
+
+  const currentUrl = window.location.href
+  if (activeExtractor && lastLazyStartUrl === currentUrl) {
+    return
+  }
+
+  startLazyExtraction(reason)
+}
+
+function startLazyExtraction(reason: string): void {
+  if (!document.body) return
+
+  stopLazyExtractor()
+  activeExtractor = new LazyExtractor(
+    { rootMargin: '300px' },
+    (batch) => {
+      registerBlocks(batch.blocks)
+      void forwardBatchToBackground(reason, batch)
+    },
+  )
+  activeExtractor.start(document.body)
+  lastLazyStartUrl = window.location.href
+}
+
+function stopLazyExtractor(): void {
+  activeExtractor?.stop()
+  activeExtractor = null
+}
+
+async function handleManualExtraction(): Promise<ManualExtractionResponse> {
+  const result = await extractCurrentPage({
+    ignoreDuplicateUrl: true,
+    updateLastExtractedUrl: true,
+  })
+
+  if (!result.ok) {
+    return { ok: false, error: result.error }
+  }
+
+  if (await isSiteEnabled(new URL(window.location.href).host)) {
+    startLazyExtraction('manual-kickstart')
+  }
+
+  return {
+    ok: true,
+    url: result.result.url,
+    totalBlocks: result.result.stats.totalBlocks,
+    totalChars: result.result.stats.totalChars,
+  }
+}
+
+async function extractCurrentPage(options: {
+  ignoreDuplicateUrl: boolean
+  updateLastExtractedUrl: boolean
+}): Promise<
+  | { ok: true; result: ExtractionResult }
+  | { ok: false; error: string }
+> {
+  if (!document.body) {
+    return { ok: false, error: 'Document body is not ready yet' }
+  }
+
+  const session = await getAuthedSession()
+  if (!session) {
+    return { ok: false, error: 'You must be signed in to extract pages' }
+  }
+
+  const currentUrl = window.location.href
+  if (!options.ignoreDuplicateUrl && lastManualExtractionUrl === currentUrl) {
+    return { ok: false, error: 'This page was already extracted for the current URL' }
+  }
+
+  try {
+    const result = extractPageText(document.body)
+    registerBlocks(result.blocks)
+
+    if (options.updateLastExtractedUrl) {
+      lastManualExtractionUrl = currentUrl
+    }
+
+    await forwardExtractionToBackground('manual-extract', result)
+    return { ok: true, result }
+  } catch (error) {
+    console.error('[gloss+1] extraction failed:', error)
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : 'Extraction failed',
+    }
+  }
+}
+
+async function getAuthedSession(): Promise<Session | null> {
+  const supabase = getSupabase()
+  if (!supabase) return null
+
+  for (const delayMs of SESSION_RETRY_DELAYS_MS) {
+    if (delayMs > 0) {
+      await delay(delayMs)
+    }
+
+    const { data: { session } } = await supabase.auth.getSession()
+    if (session) return session
+  }
+
+  return null
+}
+
+function registerBlocks(blocks: TextBlock[]): void {
+  for (const block of blocks) {
+    blockRegistry.set(block.blockId, block)
+  }
+}
+
+function applyPipelineResponse(response: PipelineResponse): void {
+  let appliedEdits = 0
+  let skippedEdits = 0
+
+  for (const blockResponse of response.blocks) {
+    if (appliedBlockIds.has(blockResponse.blockId)) {
+      console.info('[gloss+1] skipped already-applied block:', blockResponse.blockId)
+      skippedEdits += blockResponse.edits.length
+      continue
+    }
+
+    const block = blockRegistry.get(blockResponse.blockId)
+    if (!block) {
+      console.warn('[gloss+1] skipped pipeline block with no registry entry:', blockResponse.blockId)
+      skippedEdits += blockResponse.edits.length
+      continue
+    }
+
+    const element = resolveElementPath(block.path)
+    if (!element) {
+      console.warn('[gloss+1] skipped pipeline block with stale path:', block.path)
+      skippedEdits += blockResponse.edits.length
+      continue
+    }
+
+    const currentBlock = extractBlockText(element, document.body, block.sequence)
+    if (!currentBlock) {
+      skippedEdits += blockResponse.edits.length
+      continue
+    }
+
+    const validEdits = getValidNonOverlappingEdits(currentBlock.text, blockResponse.edits)
+    skippedEdits += blockResponse.edits.length - validEdits.length
+
+    console.info('[gloss+1] block edits:', {
+      blockId: blockResponse.blockId,
+      currentText: currentBlock.text.slice(0, 120),
+      rawEdits: blockResponse.edits.map((e) => `[${e.start}:${e.end}] "${e.original}" → "${e.replacement}"`),
+      validEdits: validEdits.map((e) => `[${e.start}:${e.end}] "${e.original}" → "${e.replacement}"`),
+    })
+
+    appliedBlockIds.add(blockResponse.blockId)
+
+    for (const edit of validEdits.sort((a, b) => b.start - a.start)) {
+      if (applyInlineEdit(element, currentBlock.text, edit)) {
+        appliedEdits += 1
+      } else {
+        skippedEdits += 1
+      }
+    }
+  }
+
+  console.info('[gloss+1] applied pipeline response:', {
+    requestId: response.requestId,
+    appliedEdits,
+    skippedEdits,
+  })
+}
+
+function getValidNonOverlappingEdits(text: string, edits: InlineEdit[]): InlineEdit[] {
+  const sorted = [...edits].sort((a, b) => a.start - b.start)
+  const valid: InlineEdit[] = []
+  let previousEnd = -1
+
+  for (const edit of sorted) {
+    if (edit.start < 0 || edit.end > text.length || edit.start >= edit.end) continue
+    if (edit.start < previousEnd) continue
+    if (text.slice(edit.start, edit.end) !== edit.original) continue
+
+    valid.push(edit)
+    previousEnd = edit.end
+  }
+
+  return valid
+}
+
+function applyInlineEdit(element: Element, text: string, edit: InlineEdit): boolean {
+  const occurrence = countOriginalOccurrences(text.slice(0, edit.start), edit.original)
+  const target = findOriginalOccurrenceInTextNodes(element, edit.original, occurrence)
+  if (!target) return false
+
+  const span = document.createElement('span')
+  span.textContent = edit.replacement
+  span.dataset.glossPlusOneEditId = edit.id
+  span.dataset.glossPlusOneOriginal = edit.original
+  applyHighlightStyle(span, edit)
+
+  const range = document.createRange()
+  range.setStart(target.node, target.start)
+  range.setEnd(target.node, target.end)
+  range.deleteContents()
+  range.insertNode(span)
+  return true
+}
+
+function countOriginalOccurrences(text: string, original: string): number {
+  return findOriginalMatches(text, original).length
+}
+
+function findOriginalOccurrenceInTextNodes(
+  element: Element,
+  original: string,
+  occurrence: number,
+): { node: Text; start: number; end: number } | null {
+  const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT, {
+    acceptNode(node) {
+      if (!(node instanceof Text) || !node.parentElement) return NodeFilter.FILTER_REJECT
+      if (node.parentElement.closest('[data-gloss-plus-one-edit-id]')) return NodeFilter.FILTER_REJECT
+      return NodeFilter.FILTER_ACCEPT
+    },
+  })
+  let seen = 0
+
+  while (walker.nextNode()) {
+    const node = walker.currentNode
+    if (!(node instanceof Text)) continue
+
+    for (const match of findOriginalMatches(node.textContent ?? '', original)) {
+      if (seen === occurrence) {
+        return { node, start: match.start, end: match.end }
+      }
+      seen += 1
+    }
+  }
+
+  return null
+}
+
+function findOriginalMatches(text: string, original: string): Array<{ start: number; end: number }> {
+  if (!original) return []
+
+  const matches: Array<{ start: number; end: number }> = []
+  let start = 0
+
+  while (start < text.length) {
+    const index = text.indexOf(original, start)
+    if (index === -1) break
+
+    matches.push({ start: index, end: index + original.length })
+    start = index + original.length
+  }
+
+  return matches
+}
+
+function applyHighlightStyle(span: HTMLSpanElement, edit: InlineEdit): void {
+  // Score-based opacity: higher score = more recoverable = subtler
+  const score = (edit.data?.score as number | undefined) ?? 0.5
+  // Map score [0.95, 1.0] → opacity [0.8, 0.35]
+  const t = Math.min(1, Math.max(0, (score - 0.95) / 0.05))
+  const opacity = 0.8 - t * 0.45
+
+  span.style.borderBottom = `1.5px solid rgba(60, 60, 60, ${opacity})`
+  span.style.backgroundColor = `rgba(160, 160, 160, ${opacity * 0.35})`
+  span.style.borderRadius = '2px'
+  span.style.padding = '0 2px'
+}
+
+function resolveElementPath(path: string): Element | null {
+  if (!document.body) return null
+
+  let current: Element = document.body
+  const segments = path.split('/').filter(Boolean)
+  if (segments.length === 0) return null
+
+  const first = parsePathSegment(segments[0])
+  const startIndex = first?.tagName === current.tagName ? 1 : 0
+
+  for (const segment of segments.slice(startIndex)) {
+    const parsed = parsePathSegment(segment)
+    if (!parsed) return null
+
+    const candidates = Array.from(current.children).filter((child) => child.tagName === parsed.tagName)
+    const next = candidates[parsed.index]
+    if (!next) return null
+    current = next
+  }
+
+  return current
+}
+
+function parsePathSegment(segment: string): { tagName: string; index: number } | null {
+  const match = /^(?<tagName>[A-Z0-9-]+)\[(?<index>\d+)\]$/.exec(segment)
+  if (!match?.groups) return null
+
+  return {
+    tagName: match.groups.tagName,
+    index: Number.parseInt(match.groups.index, 10),
+  }
+}
+
+async function forwardBatchToBackground(reason: string, batch: ExtractionBatch): Promise<void> {
+  console.info('[gloss+1] extraction batch (page, raw):', {
+    reason,
+    url: window.location.href,
+    joinedText: batch.blocks.map((b) => b.text).join('\n'),
+    batch,
+  })
+  totalBlocksSent += batch.blocks.length
+  updateProgress()
+  startScanning(batch.blocks)
+  pendingBatchIds.push(batch.blocks.map((b) => b.blockId))
+  try {
+    await chrome.runtime.sendMessage({
+      type: EXTRACTION_BATCH_MESSAGE,
+      reason,
+      batch,
+      url: window.location.href,
+    })
+  } catch (error) {
+    console.error('[gloss+1] failed to forward extraction batch to service worker:', error)
+    totalBlocksSent = Math.max(doneBlocks, totalBlocksSent - batch.blocks.length)
+    updateProgress()
+    const ids = pendingBatchIds.pop()
+    if (ids) stopScanning(ids)
+  }
+}
+
+const MANUAL_BATCH_SIZE = 5
+
+async function forwardExtractionToBackground(
+  reason: string,
+  result: ExtractionResult,
+): Promise<void> {
+  console.info('[gloss+1] extraction result (page, raw):', { reason, result })
+
+  // Split into small batches so early blocks get replaced while later ones are still processing
+  const { blocks } = result
+  for (let i = 0; i < blocks.length; i += MANUAL_BATCH_SIZE) {
+    const chunk = blocks.slice(i, i + MANUAL_BATCH_SIZE)
+    const batchChars = chunk.reduce((sum, b) => sum + b.text.length, 0)
+
+    try {
+      await chrome.runtime.sendMessage({
+        type: EXTRACTION_BATCH_MESSAGE,
+        reason,
+        batch: {
+          batchIndex: Math.floor(i / MANUAL_BATCH_SIZE),
+          trigger: 'manual' as const,
+          blocks: chunk,
+          stats: {
+            batchBlocks: chunk.length,
+            batchChars,
+            cumulativeBlocks: Math.min(i + MANUAL_BATCH_SIZE, blocks.length),
+            cumulativeChars: 0,
+          },
+        },
+        url: window.location.href,
+      })
+    } catch (error) {
+      console.error('[gloss+1] failed to forward extraction batch to service worker:', error)
+    }
+  }
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => window.setTimeout(resolve, ms))
+}

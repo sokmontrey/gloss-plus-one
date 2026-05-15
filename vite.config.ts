@@ -1,21 +1,24 @@
-import { defineConfig } from "vite";
-import react from "@vitejs/plugin-react";
-import tailwindcss from "@tailwindcss/vite";
-import { crx } from "@crxjs/vite-plugin";
-import manifest from "./manifest.json";
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
+
+import { crx } from '@crxjs/vite-plugin'
+import tailwindcss from '@tailwindcss/vite'
+import react from '@vitejs/plugin-react'
+import { defineConfig } from 'vite'
+import manifest from './manifest.config'
+
+const { preambleCode } = react
+const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
 export default defineConfig({
-  plugins: [react(), tailwindcss(), crx({ manifest })],
+  plugins: [
+    crx({ manifest, contentScripts: { preambleCode } }),
+    react(),
+    tailwindcss(),
+  ],
   resolve: {
     alias: {
-      "@": new URL("./src", import.meta.url).pathname,
+      '@': path.resolve(__dirname, './src'),
     },
   },
-  build: {
-    rollupOptions: {
-      input: {
-        "src/dashboard/index.html": "src/dashboard/index.html",
-      },
-    },
-  },
-});
+})
