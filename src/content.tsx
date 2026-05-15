@@ -18,7 +18,6 @@ const SESSION_RETRY_DELAYS_MS = [0, 250, 500, 1000]
 const URL_WATCH_INTERVAL_MS = 1000
 const NAVIGATION_EVENT = 'gloss-plus-one:navigation'
 const MANUAL_EXTRACT_MESSAGE = 'gloss-plus-one:manual-extract'
-const EXTRACTION_RESULT_MESSAGE = 'gloss-plus-one:extraction-result'
 const EXTRACTION_BATCH_MESSAGE = 'gloss-plus-one:extraction-batch'
 const PIPELINE_RESPONSE_MESSAGE = 'gloss-plus-one:pipeline-response'
 
@@ -414,7 +413,7 @@ function applyInlineEdit(element: Element, text: string, edit: InlineEdit): bool
   span.textContent = edit.replacement
   span.dataset.glossPlusOneEditId = edit.id
   span.dataset.glossPlusOneOriginal = edit.original
-  span.style.borderBottom = getHighlightBorder(edit)
+  applyHighlightStyle(span, edit)
 
   const range = document.createRange()
   range.setStart(target.node, target.start)
@@ -474,21 +473,17 @@ function findOriginalMatches(text: string, original: string): Array<{ start: num
   return matches
 }
 
-function getHighlightBorder(edit: InlineEdit): string {
-  if (edit.highlight?.borderStyle) return edit.highlight.borderStyle
+function applyHighlightStyle(span: HTMLSpanElement, edit: InlineEdit): void {
+  // Score-based opacity: higher score = more recoverable = subtler
+  const score = (edit.data?.score as number | undefined) ?? 0.5
+  // Map score [0.95, 1.0] → opacity [0.8, 0.35]
+  const t = Math.min(1, Math.max(0, (score - 0.95) / 0.05))
+  const opacity = 0.8 - t * 0.45
 
-  const color = edit.highlight?.color
-  if (color) return `2px solid ${color}`
-
-  switch (edit.highlight?.level) {
-    case 'low':
-      return '1px solid #fde68a'
-    case 'high':
-      return '3px solid #eab308'
-    case 'medium':
-    default:
-      return '2px solid #facc15'
-  }
+  span.style.borderBottom = `1.5px solid rgba(60, 60, 60, ${opacity})`
+  span.style.backgroundColor = `rgba(160, 160, 160, ${opacity * 0.35})`
+  span.style.borderRadius = '2px'
+  span.style.padding = '0 2px'
 }
 
 function resolveElementPath(path: string): Element | null {
@@ -543,19 +538,40 @@ async function forwardBatchToBackground(reason: string, batch: ExtractionBatch):
   }
 }
 
+const MANUAL_BATCH_SIZE = 5
+
 async function forwardExtractionToBackground(
   reason: string,
   result: ExtractionResult,
 ): Promise<void> {
   console.info('[gloss+1] extraction result (page, raw):', { reason, result })
-  try {
-    await chrome.runtime.sendMessage({
-      type: EXTRACTION_RESULT_MESSAGE,
-      reason,
-      result,
-    })
-  } catch (error) {
-    console.error('[gloss+1] failed to forward extraction to service worker:', error)
+
+  // Split into small batches so early blocks get replaced while later ones are still processing
+  const { blocks } = result
+  for (let i = 0; i < blocks.length; i += MANUAL_BATCH_SIZE) {
+    const chunk = blocks.slice(i, i + MANUAL_BATCH_SIZE)
+    const batchChars = chunk.reduce((sum, b) => sum + b.text.length, 0)
+
+    try {
+      await chrome.runtime.sendMessage({
+        type: EXTRACTION_BATCH_MESSAGE,
+        reason,
+        batch: {
+          batchIndex: Math.floor(i / MANUAL_BATCH_SIZE),
+          trigger: 'manual' as const,
+          blocks: chunk,
+          stats: {
+            batchBlocks: chunk.length,
+            batchChars,
+            cumulativeBlocks: Math.min(i + MANUAL_BATCH_SIZE, blocks.length),
+            cumulativeChars: 0,
+          },
+        },
+        url: window.location.href,
+      })
+    } catch (error) {
+      console.error('[gloss+1] failed to forward extraction batch to service worker:', error)
+    }
   }
 }
 

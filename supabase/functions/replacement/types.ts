@@ -20,6 +20,7 @@ export const ReplacementSchema = z.object({
   end: z.number().int().nonnegative(),
   original: z.string(),
   replacement: z.string(),
+  score: z.number().optional(),
 })
 
 export const ReplacementResponseSchema = z.object({

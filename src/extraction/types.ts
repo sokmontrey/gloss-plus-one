@@ -58,4 +58,5 @@ export interface LazyExtractionConfig {
   rootMargin: string
   minBlockChars: number
   mutationDebounceMs: number
+  maxBlocksPerBatch: number
 }

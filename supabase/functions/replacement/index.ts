@@ -1,6 +1,7 @@
 import "@supabase/functions-js/edge-runtime.d.ts"
 import { createClient } from "jsr:@supabase/supabase-js@2"
 import { ReplacementRequestSchema, type ReplacementResponse } from "./types.ts"
+import { runPipeline } from "./pipeline.ts"
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
@@ -56,10 +57,20 @@ Deno.serve(async (req) => {
 
   const body = parsed.data
 
-  // TODO: implement replacement logic
+  let replacements: ReplacementResponse["replacements"]
+  try {
+    replacements = await runPipeline(body.text, body.targetLanguage)
+  } catch (e) {
+    console.error("pipeline error:", e)
+    return new Response(JSON.stringify({ error: "pipeline failed", detail: String(e) }), {
+      status: 502,
+      headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
+    })
+  }
+
   const response: ReplacementResponse = {
     id: body.id,
-    replacements: [],
+    replacements,
   }
 
   return new Response(JSON.stringify(response), {

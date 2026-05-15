@@ -10,6 +10,7 @@ const DEFAULT_CONFIG: LazyExtractionConfig = {
   rootMargin: '200px',
   minBlockChars: 1,
   mutationDebounceMs: 150,
+  maxBlocksPerBatch: 5,
 }
 
 export class LazyExtractor {
@@ -132,6 +133,9 @@ export class LazyExtractor {
     const seen = new Set<Element>()
 
     for (const mutation of mutations) {
+      // Skip mutations caused by our own edit application
+      if (this.isOwnEditMutation(mutation)) continue
+
       if (mutation.type === 'characterData' && mutation.target.parentElement) {
         const blocks = discoverBlockElements(mutation.target.parentElement)
         for (const block of blocks) {
@@ -202,18 +206,25 @@ export class LazyExtractor {
 
     if (blocks.length === 0) return
 
-    this.batchIndex += 1
-    this.onBatch({
-      batchIndex: this.batchIndex,
-      trigger,
-      blocks,
-      stats: {
-        batchBlocks: blocks.length,
-        batchChars,
-        cumulativeBlocks: this.accumulatedBlocks.length,
-        cumulativeChars: this.cumulativeChars,
-      },
-    })
+    // Send in small chunks so earlier blocks get processed while later ones are still queued
+    const max = this.config.maxBlocksPerBatch
+    for (let i = 0; i < blocks.length; i += max) {
+      const chunk = blocks.slice(i, i + max)
+      const chunkChars = chunk.reduce((sum, b) => sum + b.text.length, 0)
+
+      this.batchIndex += 1
+      this.onBatch({
+        batchIndex: this.batchIndex,
+        trigger,
+        blocks: chunk,
+        stats: {
+          batchBlocks: chunk.length,
+          batchChars: chunkChars,
+          cumulativeBlocks: this.accumulatedBlocks.length,
+          cumulativeChars: this.cumulativeChars,
+        },
+      })
+    }
   }
 
   private observeElement(element: Element): void {
@@ -232,6 +243,22 @@ export class LazyExtractor {
       && rect.right >= -margin.left
       && rect.left <= window.innerWidth + margin.right
     )
+  }
+
+  private isOwnEditMutation(mutation: MutationRecord): boolean {
+    // Edits insert <span data-gloss-plus-one-edit-id> elements
+    for (const node of mutation.addedNodes) {
+      if (node instanceof Element && node.hasAttribute('data-gloss-plus-one-edit-id')) {
+        return true
+      }
+    }
+    // characterData mutations inside our edit spans
+    if (mutation.type === 'characterData' && mutation.target.parentElement) {
+      if (mutation.target.parentElement.closest('[data-gloss-plus-one-edit-id]')) {
+        return true
+      }
+    }
+    return false
   }
 
   private resetCaches(): void {
