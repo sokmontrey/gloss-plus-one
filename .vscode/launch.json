@@ -1,0 +1,16 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+      {
+        "name": "Attach to Edge Function",
+        "type": "node",
+        "request": "attach",
+        "port": 8083,
+        "address": "127.0.0.1",
+        "localRoot": "${workspaceFolder}/supabase/functions/replacement",
+        "remoteRoot": "/var/tmp/sb-compile-edge-runtime/replacement",
+        "protocol": "inspector",
+        "skipFiles": ["<node_internals>/**"]
+      }
+    ]
+  }
