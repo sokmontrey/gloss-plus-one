@@ -1,119 +1,169 @@
-# GlossPlusOne (Gloss+1)
+# GlossPlusOne (gloss+1)
 
 <div align="center">
-A language learning platform built around comprehensible input (i+1)<br>
-Post-hackathon codebase: MVP for VC pitch + core backend groundwork<br>
+A Chrome browser extension for immersive language learning<br>
+Built at Hack Canada 2026 🇨🇦
 </div>
 
-## Overview
+## 🌟 Overview
+GlossPlusOne is an intelligent language learning overlay that transforms your everyday browsing into an immersive language learning experience. 
 
-Gloss+1 helps learners stay in **meaningful target-language input** just above their current level—the **i+1 hypothesis** (Krashen): input should be mostly understood, with a small stretch toward what comes next. The product goal is to **introduce functional language early**, build durable toolsets (patterns, vocabulary, pragmatics), and **personalize** what the learner sees so they rarely need to drop back to a fully comfortable language.
+## What's this random ahh sounding name?
+Let's address this. 
+- Gloss = the saying of "glossing over something"
+- Plus One = Krashen's i + 1 Hypothesis (Input Hypothesis)
 
-This branch is a **rebuild focused on**:
+## ✨ Key Features
+- 🔍 **Instant Translation Overlay** - Highlight any text to see translations with contextual definitions
+- 🗣️ **Text-to-Speech Pronunciation** - Hear native pronunciations for words and phrases
+- 📚 **AI-Powered Glossary** - Context-aware definitions powered by Gemini and Groq
+- 🧠 **Continuous Memory** - Language progress syncs continuously with an AI assistant through Backboard
+- 🎯 **Self-Assessment "Try Out" Mode** - Select English text sections and test your translation skills
+- 🎮 **Gamified Learning** - Earn scores and track your progress as you learn
+- 🌍 **Multi-Language Support** - Learn multiple languages while browsing naturally
+- ⚡ **Seamless Integration** - Works on any website without disrupting your browsing
 
-1. **Core backend** — user identity, profiles, and (next) progress and personalization data in Postgres (Supabase).
-2. **Chrome extension** — first client surface: auth, then learning UI wired to that backend.
+## 🎯 How It Works
+1. **Browse Naturally** - Visit any website in your target language
+2. **Highlight & Learn** - Select words or phrases you don't understand
+3. **Get Instant Help** - See translations, definitions, and hear pronunciations
+4. **Practice & Test** - Use "Try Out" mode to translate sections and get scored
+5. **Level Up** - Track your progress and improve over time
 
-Future clients (dedicated app, YouTube integration, mobile) are expected to use the **same** user and progress APIs.
+---
 
-## Name
-
-- **Gloss** — the idea of lightly supporting understanding without breaking immersion.
-- **+1** — i+1: the next small step of comprehensible challenge.
-
-## Hackathon build vs. this repo
-
-The **Hack Canada 2026** demo added rich on-page features (LLM-backed glosses, TTS, assessment flows, third-party learning memory). That work validated UX and narrative; **this repository is intentionally slimmer** while the data model and server-side personalization are designed.
-
-| Area | Hackathon direction (reference) | Current repo |
-|------|-----------------------------------|--------------|
-| Auth | Varies by prototype | Google OAuth via Supabase; session in `chrome.storage` |
-| Data | Client-heavy | Supabase Auth + `public.user_profiles`; migrations in `supabase/migrations/` |
-| Extension UI | Full overlay | Popup sign-in/out; content script mounts shadow host only (overlay UI not wired) |
-| LLMs / TTS / external assistants | Integrated in demo | Not in dependencies; add when the personalization layer needs them |
-
-## Tech stack
-
-- **Extension client**: React 19, TypeScript, Vite, `@crxjs/vite-plugin` (Manifest V3), Tailwind CSS v4
-- **Backend (current)**: [Supabase](https://supabase.com/) — Auth + PostgreSQL
-- **Roadmap**: Row Level Security policies for all profile access patterns, Edge Functions or API routes for aggregation and recommendation logic, concept/progress tables keyed by `user_id`
-
-## User model (today)
-
-On **Google sign-up**, a trigger creates a row in `public.user_profiles`:
-
-- `user_id` (PK, FK to `auth.users`)
-- `email`, optional `name`, `avatar_url`
-- `target_language` — nullable until onboarding collects it
-- `proficiency_level` — defaults to `0`
-- `onboarding_complete` — defaults to `false`
-
-See `supabase/migrations/` for the exact schema and trigger.
-
-## Getting started
+## 🚀 Getting Started
 
 ### Prerequisites
+- Node.js (v18 or higher)
+- NPM or PNPM
+- Google Chrome Browser
+- **API Keys**:
+  - Google Gemini API Key
+  - Groq API Key
+  - ElevenLabs API Key
+  - Backboard API Key and Assistant ID
 
-- Node.js 18+ (repo uses modern tooling; Node 20+ recommended)
-- Chrome (Chromium) for loading the unpacked extension
-- A Supabase project with Google provider enabled
+### Installation & Configuration
+1. Clone the repository:
+   ```bash
+   git clone https://github.com/sokmontrey/gloss-plus-one.git
+   cd gloss-plus-one
+   ```
+2. Install dependencies:
+   ```bash
+   npm install
+   ```
+3. Create a `.env.local` file in the root directory and add your API credentials:
+   ```ini
+   VITE_GEMINI_API_KEY=your_gemini_key_here
+   VITE_GROQ_API_KEY=your_groq_key_here
+   VITE_ELEVENLABS_API_KEY=your_elevenlabs_key_here
+   VITE_BACKBOARD_API_KEY=your_backboard_key_here
+   VITE_BACKBOARD_ASSISTANT_ID=your_backboard_assistant_id_here
+   ```
 
-### Install
+## 💻 Development
 
+### Tech Stack
+- **Frontend**: React, TypeScript, Chrome Extension API (Manifest V3), Shadcn UI, Vite
+- **AI/ML**: Google Gemini API, Groq API (LLaMA inference)
+- **Text-to-Speech**: ElevenLabs API / Web Speech API
+- **Styling**: Tailwind CSS
+
+### Setup for Development
+Run the local Vite development server:
 ```bash
-git clone https://github.com/sokmontrey/gloss-plus-one.git
-cd gloss-plus-one
-npm install
+npm run dev
 ```
 
-### Environment
-
-Create `.env.local` in the project root:
-
-```ini
-VITE_SUPABASE_URL=https://YOUR_PROJECT.supabase.co
-VITE_SUPABASE_PUBLISHABLE_KEY=your_anon_public_key
-```
-
-The extension reads these at build time (`import.meta.env`).
-
-### Develop and build
-
+### Building
+To build a production bundle for the Chrome Extension store:
 ```bash
-npm run dev      # Vite dev server (popup)
-npm run build    # Production bundle → dist/
+npm run build
+```
+Once built, the production files will be placed inside the `dist/` directory.
+
+### Loading the Extension in Chrome
+1. Navigate to `chrome://extensions/`
+2. Enable "Developer mode" in the top right.
+3. Click "Load unpacked" and select the `dist/` folder inside the `gloss-plus-one` project directory.
+4. The extension is now active and ready to use!
+
+### Testing
+Use `npm run typecheck` to verify TypeScript typings and find regressions:
+```bash
 npm run typecheck
 ```
 
-### Load the extension
+## 🎨 Features Deep Dive
 
-1. Open `chrome://extensions/`
-2. Enable **Developer mode**
-3. **Load unpacked** → select the `dist/` folder after `npm run build`
+### Translation Overlay
+Hover or click highlighted text to see instant translations with contextual definitions that help you understand not just the word, but how it's used. Includes audio pronunciations via ElevenLabs.
 
-### Supabase migrations
+### AI-Powered Learning
+Our integration with Gemini and Groq provides intelligent, context-aware definitions that adapt to your learning level. The structural translations help parse sentence flow visually.
 
-Apply SQL in `supabase/migrations/` to your project (Supabase SQL editor or CLI) so `user_profiles` and the signup trigger exist and match the client.
+### Continuous Progress Memory
+GlossPlusOne automatically generates progress reports indicating which phrases you know well, what you are reinforcing, and what you are struggling with. This is continuously synced to a backend assistant thread via **Backboard** (`https://app.backboard.io/api`), ensuring long-term learning memory.
 
-## Roadmap (pitch MVP)
+### Self-Assessment Mode
+Transform passive learning into active practice:
+1. Select any section of English text
+2. Click "Try Out" to attempt to translate it to your target language
+3. Get instant evaluation, a precise visual diff, and 1-5 scoring
+4. See assessments mapped directly into your vocabulary bank's progression thresholds!
 
-- **Profiles**: Read/update own profile from the extension after RLS policies cover `SELECT` / `UPDATE` for authenticated users (today only an insert policy is defined; extend before onboarding UI).
-- **Progress model**: Tables for concepts, user mastery, and learning events; APIs to drive i+1 decisions.
-- **Extension**: Onboarding (target language, level), then contextual help UI backed by the progress service.
-- **Long term**: Additional surfaces sharing the same backend.
+### Gamification
+- Earn points for correct translations directly into your _Assessment Score_.
+- Track your learning streaks.
+- Consistently achieving high scores quickly bumps phrase confidence levels—unlocking the next tier of language difficulty.
+- Monitor progress across different difficulty levels right in the popup overlay or the custom dashboard.
 
-## Contributing
+## 🛠️ Usage
 
-Fork, branch, PR. See `context.md` for a concise map of the codebase.
+### Basic Usage
+After installing the extension and configuring your target language via the extension popup (defaulting to Spanish), visit any website. Use your mouse to select foreign text. A floating widget will automatically decode the text for you, adding new phrases straight into your personal "Phrase Bank" for spaced-repetition testing.
 
-## License
+### Advanced Features
+- **Progression Thresholds**: Tweak the slider inside the popup to control how confidently you want to memorize phrases before GlossPlusOne injects new, highly-complex vocabulary into the pages you read.
+- **Page Blacklisting**: If the overlay ruins formatting on a sensitive site (like online banking), quickly click "Disable on this page" in the popup menu.
 
-MIT — see `LICENSE`.
+## 🤝 Contributing
+We welcome contributions! This project was built at Hack Canada 2026, and we're excited to continue improving it.
 
-## Acknowledgments
+1. Fork the Project
+2. Create your Feature Branch (`git checkout -b feature/AmazingFeature`)
+3. Commit your Changes (`git commit -m 'Add some AmazingFeature'`)
+4. Push to the Branch (`git push origin feature/AmazingFeature`)
+5. Open a Pull Request
 
-Built at **Hack Canada 2026** (Second Place Overall; SPUR Founder Track recognitions). [Devpost submission](https://devpost.com/software/glossplusone).
+## 📝 License
+Distributed under the MIT License. See `LICENSE` for more information.
+
+## 🏆 Hackathon
+Built with ❤️ at Hack Canada 2026
+
+**Team**
+- Me, I, myself, and a will to love.
+
+### 🙏 Acknowledgments
+- The Hack Canada 2026 organizers and sponsors. You guys are cooking.
+- Our HuskyHack Gang from GBP. Thanks for making this adventure less lonely.
+
+## 📧 Contact
+For support or questions, feel free to open an issue or reach out to the project maintainers!
+
+## Future of GlossPlusOne
+- Polish the current text extraction to minimize token input that's being sent to an llm
+- Implement additional frictionless assessment Pronunciation practice assessment: Use state of the art speech analysis service to provide user with quick pronunciation correction for phrases
+- Implement a better webpage content extraction that be able to determine better words and phrase
+- Implement a more comprehensive agentic user context (memory) management, concrete data grounding to avoid hallucination  
+- Deal with Right-To-Left language (RTL) (Arabic)
+- Even the definition itself will become more and more the target language as the user aquired necessary words or phrase to explain them.
+- Make everything production ready with centralize server for more efficient processing, word bank generation (can be reuse across user with similar preference), and informed replacement
 
 <div align="center">
-Happy learning — one comprehensible step at a time.
+Happy Learning! 🌍📚<br>
+Making language learning natural, one highlight at a time.
 </div>
