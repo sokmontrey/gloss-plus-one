@@ -153,8 +153,10 @@ site_url = "http://127.0.0.1:5173"
 additional_redirect_urls = [
   "http://localhost:5173",
   "http://127.0.0.1:5173",
-  "https://haiphfjhlibbnincejegfachfidmnaao.chromiumapp.org/"
+  "https://haiphfjhlibbnincejegfachfidmnaao.chromiumapp.org/",
+  "https://mlkpeifkpgbndcnegafeahcnhloojikn.chromiumapp.org/"
   # Chrome extension dev — replace <EXT_ID> with the ID from chrome://extensions
+
   # "https://<EXT_ID>.chromiumapp.org/",
 ]
 # How long tokens are valid for, in seconds. Defaults to 3600 (1 hour), maximum 604,800 (1 week).
