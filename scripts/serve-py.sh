@@ -5,8 +5,8 @@ trap 'kill 0' EXIT
 export TRANSFORMERS_OFFLINE="${TRANSFORMERS_OFFLINE:-0}"
 export HF_DATASETS_OFFLINE="${HF_DATASETS_OFFLINE:-0}"
 
-(cd lexicon-service && source venv/bin/activate && uvicorn app:app --host 0.0.0.0 --port 8001) &
-(cd mlm-service && source venv/bin/activate && uvicorn app:app --host 0.0.0.0 --port 8002 --workers "${MLM_WORKERS:-4}") &
-(cd translation-service && source venv/bin/activate && uvicorn app:app --host 0.0.0.0 --port 8003) &
+(cd lexicon-service && source .venv/bin/activate && uvicorn app:app --host 0.0.0.0 --port 8001) &
+(cd mlm-service && source .venv/bin/activate && uvicorn app:app --host 0.0.0.0 --port 8002 --workers "${MLM_WORKERS:-4}") &
+(cd translation-service && source .venv/bin/activate && uvicorn app:app --host 0.0.0.0 --port 8003) &
 
 wait
