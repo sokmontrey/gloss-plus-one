@@ -17,7 +17,7 @@ start-functions: ##@Development Start edge functions
 	@supabase functions serve --env-file .env
 .PHONY:start-functions
 
-start-service: ##@Development Start services
+start-services: ##@Development Start services
 	@docker compose up
 .PHONY:start-service
 
