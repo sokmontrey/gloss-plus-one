@@ -1,0 +1,4 @@
+[tools]
+node = "24"
+supabase = "latest"
+uv = "latest"
