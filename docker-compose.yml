@@ -1,14 +1,14 @@
 services:
   lexicon-service:
-    build: lexicon-service/
+    build: services/lexicon-service/
     ports:
       - "8001:8001"
   mlm-service:
-    build: mlm-service/
+    build: services/mlm-service/
     ports:
       - "8002:8002"
   translation-service:
-    build: translation-service/
+    build: services/translation-service/
     ports:
       - "8003:8003"
     
