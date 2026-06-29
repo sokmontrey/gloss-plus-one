@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Spinner } from '@/components/spinner'
-import { signInWithGoogle } from '@/lib/auth'
+import { GOOGLE_SIGN_IN_MESSAGE } from '@/lib/auth'
 
 export function GoogleSignInButton() {
   const [loading, setLoading] = useState(false)
@@ -11,7 +11,13 @@ export function GoogleSignInButton() {
     setLoading(true)
     setError(null)
     try {
-      await signInWithGoogle()
+      const response = (await chrome.runtime.sendMessage({ type: GOOGLE_SIGN_IN_MESSAGE })) as
+        | { ok: true }
+        | { ok: false; error?: string }
+        | undefined
+      if (response && response.ok === false) {
+        setError(response.error ?? 'Sign-in failed')
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Sign-in failed')
     } finally {
