@@ -28,6 +28,6 @@ for category_name, targets in categories_and_targets.items():
     print(f'\n{category_name}:')
     for name, description in targets:
         padding = 20 - len(name)
-        print(f'  {name}{padding * ' '}{description}')
+        print(f'  {name}{padding * " "}{description}')
 
 print()
