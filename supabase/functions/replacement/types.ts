@@ -2,7 +2,7 @@ import { z } from "zod"
 
 // ── Shared ────────────────────────────────────────────────────────────────────
 
-export const LanguageCodeSchema = z.enum(['en', 'fr', 'es'])
+export const LanguageCodeSchema = z.enum(['en', 'pt'])
 
 // ── Request ───────────────────────────────────────────────────────────────────
 
