@@ -15,7 +15,7 @@ const languageCodeMap: Record<LanguageCode, string> = {
     pt: "PT-BR",
 };
 
-class DeepLTranslationService implements TranslationService {
+export class DeepLTranslationService implements TranslationService {
     private readonly apiUrl: string;
     private readonly apiKey: string;
 
