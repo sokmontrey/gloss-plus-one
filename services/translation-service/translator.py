@@ -1,13 +1,18 @@
 from model_loader import get_model
 
-
-def translate_sentence(text: str, src_lang: str, tgt_lang: str) -> str:
-    model, tokenizer = get_model(f"{src_lang}-{tgt_lang}")
-    inputs = tokenizer([text], return_tensors="pt", padding=True)
-    translated = model.generate(**inputs)
-    return tokenizer.decode(translated[0], skip_special_tokens=True)
+# 2-letter ISO → 3-letter OPUS code (model vocab uses 3-letter).
+# ponytail: only "pt" mapped; add es/fr/it/ro when callers need them.
+LANG_MAP = {"pt": "por"}
 
 
 # ponytail: single batch, split sentences if inputs exceed model max_length
-def translate_text(text: str, src_lang: str, tgt_lang: str) -> str:
-    return translate_sentence(text.strip(), src_lang, tgt_lang)
+def translate_text(texts: list[str], src_lang: str, tgt_lang: str) -> list[str]:
+    code = LANG_MAP.get(tgt_lang, tgt_lang)
+    model, tokenizer = get_model()
+    inputs = tokenizer(
+        [f">>{code}<< {t.strip()}" for t in texts],
+        return_tensors="pt",
+        padding=True,
+    )
+    translated = model.generate(**inputs)
+    return [tokenizer.decode(t, skip_special_tokens=True) for t in translated]
