@@ -20,13 +20,13 @@ export class RecoverClass implements RecoverablityService {
     if (!response.ok) {
       return null;
     }
-    const data = await response.json();
+    const data = await response.json(); // idk if we need to await again but I will leave for now
     return data.score;
   }
 
   async scoreLexicons(
     text: string,
-    lexicons: Lexicon[],
+    lexicons: Lexicon[], // list of words that can be replaced = lexicons
   ): Promise<ScoredLexicon[]> {
     if (lexicons.length === 0) return [];
 
@@ -49,13 +49,19 @@ export class RecoverClass implements RecoverablityService {
     const mlmTokens: MlmToken[] = data.tokens ?? [];
 
     return lexicons.map((lex) => {
+      // checking if any placements are overlapping
       const overlapping = mlmTokens.filter(
         (t) => t.score !== null && t.start < lex.end && t.end > lex.start,
       );
 
       let score: number | null = null;
       if (overlapping.length > 0) {
-        const sum = overlapping.reduce((acc, t) => acc + (t.score as number), 0);
+        const sum = overlapping.reduce(
+          //TODO:learn what this does
+          // not really sure what this is doing but LGTM. will get back to this later
+          (acc, t) => acc + (t.score as number),
+          0,
+        );
         score = sum / overlapping.length;
       }
 

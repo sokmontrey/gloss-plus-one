@@ -17,7 +17,7 @@ export class ReplacementClass implements ReplacementService {
     translations: TranslationItem[],
   ): Replacement[] {
     const translationById = new Map<number, string | null>(
-      translations.map((t) => [t.id, t.target]),
+      translations.map((translation) => [translation.id, translation.target]),
     );
 
     const replacements: Replacement[] = [];

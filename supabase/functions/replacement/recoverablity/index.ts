@@ -1,6 +1,7 @@
 import type { Lexicon } from "../lexicon/index.ts";
 
 export interface MlmToken {
+  // I think the start and end is replacment cords
   text: string;
   start: number;
   end: number;

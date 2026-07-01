@@ -1,7 +1,7 @@
 import type { Lexicon, LexiconService } from "./index.ts";
 
 const LEXICON_URL = Deno.env.get("LEXICON_URL") ?? "http://localhost:8001";
-const REPLACEABLE_TYPES = new Set(["function"]);
+const REPLACEABLE_TYPES = new Set(["function"]); // this means that only words like "the" -> "le" will be marked for replacing
 
 export class LexiconClass implements LexiconService {
   async getReplaceableLexicons(text: string): Promise<Lexicon[]> {
