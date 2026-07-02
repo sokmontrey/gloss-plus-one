@@ -1,13 +1,13 @@
-import { LanguageCode } from "../types";
-import { TranslationService } from "./";
+import { LanguageCode } from "../types.ts";
+import { TranslationService } from "./index.ts";
 
 interface CustomTranslateResponse {
     translations: string[];
 }
 
 const languageCodeMap: Record<LanguageCode, string> = {
-    en: 'en',
-    pt: 'pt',
+    en: "en",
+    pt: "pt",
 };
 
 export class CustomTranslationService implements TranslationService {
@@ -20,21 +20,20 @@ export class CustomTranslationService implements TranslationService {
     async translate(
         sourceText: string[],
         sourceLanguage: LanguageCode,
-        targetLanguage: LanguageCode
+        targetLanguage: LanguageCode,
     ): Promise<string[]> {
         const mappedSourceLanguage = languageCodeMap[sourceLanguage];
         const mappedTargetLanguage = languageCodeMap[targetLanguage];
 
-
         const response = await fetch(this.apiUrl, {
-            method: 'POST',
+            method: "POST",
             headers: {
-                'Content-Type': 'application/json',
+                "Content-Type": "application/json",
             },
             body: JSON.stringify({
-                text: [ sourceText ],
-                sourceLanguage: mappedSourceLanguage,
-                targetLanguage: mappedTargetLanguage,
+                text: sourceText,
+                source_lang: mappedSourceLanguage,
+                target_lang: mappedTargetLanguage,
             }),
         });
 
@@ -42,7 +41,7 @@ export class CustomTranslationService implements TranslationService {
             throw new Error(`HTTP error! status: ${response.status}`);
         }
 
-        const data = await response.json() as CustomTranslateResponse;
+        const data = (await response.json()) as CustomTranslateResponse;
         return data.translations;
     }
 }

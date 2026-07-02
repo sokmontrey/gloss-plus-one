@@ -1,5 +1,5 @@
-import { LanguageCode } from "../types";
-import { TranslationService } from "./";
+import { LanguageCode } from "../types.ts";
+import { TranslationService } from "./index.ts";
 
 interface DeepLTranslatedUnit {
     text: string;
@@ -20,7 +20,7 @@ export class DeepLTranslationService implements TranslationService {
     private readonly apiKey: string;
 
     constructor(apiUrl: string, apiKey: string) {
-        this.apiUrl = apiUrl || "https://api.deepl.com/v2/translate";
+        this.apiUrl = apiUrl;
         this.apiKey = apiKey;
     }
 
@@ -39,12 +39,17 @@ export class DeepLTranslationService implements TranslationService {
                 Authorization: `DeepL-Auth-Key ${this.apiKey}`,
             },
             body: JSON.stringify({
-                text: [sourceText],
+                text: sourceText,
                 source_lang: mappedSourceLanguage,
                 target_lang: mappedTargetLanguage,
             }),
         });
-        const data = await response.json();
+
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+
+        const data = (await response.json()) as DeepLResponse;
         return data.translations.map((x: DeepLTranslatedUnit) => x.text);
     }
 }
