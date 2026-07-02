@@ -17,6 +17,10 @@ start-functions: ##@Development Start edge functions
 	@supabase functions serve --env-file .env
 .PHONY:start-functions
 
+test-functions: ##@Development Run edge function tests
+	@cd supabase/functions/replacement/translate && deno test --env-file=../../../.env tests/ --allow-env --allow-net
+.PHONY:test-functions
+
 start-services: ##@Development Start services
 	@docker compose up
 .PHONY:start-service
