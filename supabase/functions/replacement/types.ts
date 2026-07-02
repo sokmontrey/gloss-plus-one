@@ -4,6 +4,10 @@ import { z } from "npm:zod@^3"
 // ── Shared ────────────────────────────────────────────────────────────────────
 
 export const LanguageCodeSchema = z.enum(['en', 'pt'])
+export const EnvSchema = z.object({
+    DEEPL_API_URL: z.string(),
+    DEEPL_API_KEY: z.string(),
+});
 
 // ── Request ───────────────────────────────────────────────────────────────────
 
@@ -35,3 +39,4 @@ export type LanguageCode = z.infer<typeof LanguageCodeSchema>
 export type ReplacementRequest = z.infer<typeof ReplacementRequestSchema>
 export type Replacement = z.infer<typeof ReplacementSchema>
 export type ReplacementResponse = z.infer<typeof ReplacementResponseSchema>
+export type EnvType = z.infer<typeof EnvSchema>;
