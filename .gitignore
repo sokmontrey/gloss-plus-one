@@ -51,6 +51,7 @@ Thumbs.db
 *~
 *.swp
 *.swo
+.idea
 
 # Cursor local state
 .cursor/worktrees.json

@@ -4,9 +4,10 @@ help: ##@Miscellaneous Show this help message
 
 setup: ##@Development Install dependentcies for the project
 	@npm i &&\
-	cd lexicon-service && uv sync &&\
+	cd services/lexicon-service && uv sync &&\
 	cd ../mlm-service && uv sync &&\
-	cd ../translation-service && uv sync
+	cd ../translation-service && uv sync &&\
+	cd ../text-partitioning-service && uv sync
 .PHONY:setup
 
 build-extension: ##@Development Build gloss-plus-one web extension

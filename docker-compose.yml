@@ -11,4 +11,8 @@ services:
     build: services/translation-service/
     ports:
       - "8003:8003"
+  text-partitioning-service:
+    build: services/text-partitioning-service/
+    ports:
+      - "8004:8004"
     
