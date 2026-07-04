@@ -42,6 +42,8 @@ export class DeepLTranslationService implements TranslationService {
                 text: sourceText,
                 source_lang: mappedSourceLanguage,
                 target_lang: mappedTargetLanguage,
+                tag_handling: "xml",
+                tag_handling_version: "v2",
             }),
         });
 

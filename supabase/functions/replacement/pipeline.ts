@@ -14,17 +14,23 @@ export async function runPipeline(
 
     const { translationService } = createServices(envParseResult.data);
 
-    const translatedText = await translationService.translate([text], sourceLanguage, targetLanguage);
+    const translatedText = await translationService.translate(
+        [text],
+        sourceLanguage,
+        targetLanguage,
+    );
 
     // ...
     // Other modules and steps
     // ...
 
-    return [{
-        start: 0,
-        end: translatedText[0].length,
-        original: text,
-        replacement: translatedText[0],
-        score: undefined,
-    }];
+    return [
+        {
+            start: 0,
+            end: translatedText[0].length,
+            original: text,
+            replacement: translatedText[0],
+            score: undefined,
+        },
+    ];
 }
