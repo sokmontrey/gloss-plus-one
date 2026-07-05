@@ -5,8 +5,8 @@ import { z } from "npm:zod@^3"
 
 export const LanguageCodeSchema = z.enum(['en', 'pt'])
 export const EnvSchema = z.object({
-    DEEPL_API_URL: z.string(),
-    DEEPL_API_KEY: z.string(),
+    SB_TRANSLATE_DEEPL_API_URL: z.string(),
+    SB_TRANSLATE_DEEPL_API_KEY: z.string(),
 });
 
 // ── Request ───────────────────────────────────────────────────────────────────
@@ -14,7 +14,7 @@ export const EnvSchema = z.object({
 export const ReplacementRequestSchema = z.object({
   id: z.string(),
   text: z.string(),
-  originalLanguage: LanguageCodeSchema,
+  sourceLanguage: LanguageCodeSchema,
   targetLanguage: LanguageCodeSchema,
 })
 

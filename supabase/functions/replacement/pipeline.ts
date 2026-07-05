@@ -7,18 +7,26 @@ export async function runPipeline(
     targetLanguage: string,
 ): Promise<Replacement[]> {
     const envParseResult = EnvSchema.safeParse(Deno.env.toObject());
-
     if (!envParseResult.success) {
         throw new Error("Invalid environment variables");
     }
 
-    const { translationService } = createServices(envParseResult.data);
+    const { translationService, unitTagService } = createServices(envParseResult.data);
 
-    const translatedText = await translationService.translate(
-        [text],
+    const spans = [{ start: 4, end: 7, value: "cat" }];
+    const units = spans.map((span, index) => ({ ...span, id: index }));
+
+    const taggedText = unitTagService.insert(text, units);
+
+    const translatedText = (await translationService.translate(
+        [taggedText],
         sourceLanguage,
         targetLanguage,
-    );
+    ))[0];
+
+    const extractedSpans = unitTagService.extract(translatedText, units);
+
+    console.log(extractedSpans);
 
     // ...
     // Other modules and steps
