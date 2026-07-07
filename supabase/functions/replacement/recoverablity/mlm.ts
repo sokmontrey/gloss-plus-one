@@ -1,20 +1,29 @@
-import type { RecoverablityService } from "./index.ts";
+import type { RecoverabilityToken, RecoverablityService } from "./index.ts";
 
 export class MlmRecoverabilityService implements RecoverablityService {
-  private readonly MLM_URL = Deno.env.get("MLM_URL") ?? "http://localhost:8002";
-  async score(text: string): Promise<number[]> {
-    const response = await fetch(`${this.MLM_URL}/recoverable_score`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ text }),
-    });
+    private readonly mlmUrl: string;
 
-    if (!response.ok) {
-      return [];
+    constructor(mlmUrl: string) {
+        this.mlmUrl = mlmUrl ?? "http://localhost:8002";
     }
-    const data = await response.json(); // idk if we need to await again but I will leave for now
-    return data.score;
-  }
+
+    async score(text: string): Promise<RecoverabilityToken[]> {
+        const response = await fetch(`${this.mlmUrl}/recoverable_score`, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ text }),
+        });
+
+        if (!response.ok) {
+            throw new Error("Failed to score text");
+        }
+
+        const data = await response.json();
+
+        console.log(data);
+
+        return data.score;
+    }
 }
