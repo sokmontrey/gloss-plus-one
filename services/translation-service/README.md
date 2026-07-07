@@ -1,57 +1,44 @@
-cho # Translation Service
+# Translation Service
 
-A local Python translation microservice using Helsinki-NLP OPUS-MT models and SimAlign for word-level alignment.
+A local Python translation microservice using Helsinki-NLP OPUS-MT models.
 
 ## Setup
 
 ```bash
 cd translation-service
-python -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
+uv sync
 ```
 
-**Note:** First run downloads models automatically:
-- ~300MB per language pair (en-es, en-fr, en-de) from Helsinki-NLP/OPUS-MT
-- ~700MB for the SimAlign BERT alignment model
+**Note:** First run downloads the model automatically (~300MB from Helsinki-NLP/OPUS-MT).
 
 ## Run
 
 ```bash
-uvicorn app:app --port 8003
+uv run uvicorn app:app --host 0.0.0.0 --port 8003
 ```
 
 ## API
+
+### GET /languages
+
+```json
+{ "supported_pairs": [{ "source": "en", "target": "pt" }] }
+```
 
 ### POST /translate
 
 ```json
 {
-  "text": "She drove the red car.",
-  "target_lang": "es",
-  "lexicons": [
-    { "id": 0, "start": 14, "end": 17, "text": "red" },
-    { "id": 1, "start": 18, "end": 21, "text": "car" }
-  ]
+  "text": ["She drove the red car.", "Good morning."],
+  "source_lang": "en",
+  "target_lang": "pt"
 }
 ```
 
 Response:
 
 ```json
-{
-  "full_translation": "Condujo el coche rojo.",
-  "translations": [
-    { "id": 0, "source": "red", "target": "rojo" },
-    { "id": 1, "source": "car", "target": "coche" }
-  ]
-}
+{ "translations": ["Ela conduziu o carro vermelho.", "Bom dia."] }
 ```
 
-Supported target languages: `es`, `fr`, `de`
-
-## Tests
-
-```bash
-pytest tests/ -v
-```
+Backed by `Helsinki-NLP/opus-mt-en-roa` (multilingual en→Romance, ~300MB). The API currently exposes only `en→pt`; the underlying model supports more Romance targets but they're not mapped in `LANG_MAP` yet.

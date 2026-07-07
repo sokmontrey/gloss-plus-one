@@ -1,24 +1,17 @@
 from transformers import MarianMTModel, MarianTokenizer
 
-_model_cache: dict[str, tuple] = {}
-_aligner = None
-
-SUPPORTED_PAIRS = ["en-es", "en-fr", "en-de"]
+_model: tuple | None = None
 
 
-def get_model(lang_pair: str) -> tuple[MarianMTModel, MarianTokenizer]:
-    if lang_pair not in _model_cache:
-        model_name = f"Helsinki-NLP/opus-mt-{lang_pair}"
+# Helsinki-NLP/opus-mt-en-roa: multilingual en→Romance (~300MB), covers pt.
+# Dedicated en-pt doesn't exist; this model + forced_bos_token_id picks the target.
+# ponytail: no int8/4bit quant — add bitsandbytes only if peak RAM is a problem.
+def get_model() -> tuple[MarianMTModel, MarianTokenizer]:
+    global _model
+    if _model is None:
+        model_name = "Helsinki-NLP/opus-mt-en-roa"
         tokenizer = MarianTokenizer.from_pretrained(model_name)
-        model = MarianMTModel.from_pretrained(model_name)
+        model = MarianMTModel.from_pretrained(model_name, low_cpu_mem_usage=True)
         model.eval()
-        _model_cache[lang_pair] = (model, tokenizer)
-    return _model_cache[lang_pair]
-
-
-def get_aligner():
-    global _aligner
-    if _aligner is None:
-        from simalign import SentenceAligner
-        _aligner = SentenceAligner(matching_methods="i")
-    return _aligner
+        _model = (model, tokenizer)
+    return _model

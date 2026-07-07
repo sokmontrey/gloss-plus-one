@@ -6,7 +6,6 @@ dependencies = [
     "fastapi>=0.138.1",
     "sacremoses>=0.1.1",
     "sentencepiece>=0.2.1",
-    "simalign>=0.4",
     "torch>=2.12.1",
     "transformers>=5.12.1",
     "uvicorn>=0.49.0",

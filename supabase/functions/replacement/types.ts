@@ -1,15 +1,20 @@
-import { z } from "zod"
+import { z } from "npm:zod@^3"
+
 
 // ── Shared ────────────────────────────────────────────────────────────────────
 
-export const LanguageCodeSchema = z.enum(['en', 'fr', 'es'])
+export const LanguageCodeSchema = z.enum(['en', 'pt'])
+export const EnvSchema = z.object({
+    SB_TRANSLATE_DEEPL_API_URL: z.string(),
+    SB_TRANSLATE_DEEPL_API_KEY: z.string(),
+});
 
 // ── Request ───────────────────────────────────────────────────────────────────
 
 export const ReplacementRequestSchema = z.object({
   id: z.string(),
   text: z.string(),
-  originalLanguage: LanguageCodeSchema,
+  sourceLanguage: LanguageCodeSchema,
   targetLanguage: LanguageCodeSchema,
 })
 
@@ -34,3 +39,4 @@ export type LanguageCode = z.infer<typeof LanguageCodeSchema>
 export type ReplacementRequest = z.infer<typeof ReplacementRequestSchema>
 export type Replacement = z.infer<typeof ReplacementSchema>
 export type ReplacementResponse = z.infer<typeof ReplacementResponseSchema>
+export type EnvType = z.infer<typeof EnvSchema>;
