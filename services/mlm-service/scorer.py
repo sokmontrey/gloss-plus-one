@@ -20,8 +20,9 @@ from collections import OrderedDict
 
 import torch
 import torch.nn.functional as F
-from model_loader import get_tokenizer, get_model, get_device
+
 from chunker import chunk_text
+from model_loader import get_device, get_model, get_tokenizer
 
 BATCH_SIZE = 32
 _CACHE_MAX = 64
@@ -33,31 +34,25 @@ _PUNCT_RE = re.compile(r"^[\W_]+$")
 _score_cache: OrderedDict = OrderedDict()
 
 
-def _cache_key(text: str, include_ranges: list[dict] | None) -> str:
+def _cache_key(text: str) -> str:
     h = hashlib.md5(text.encode()).hexdigest()[:16]
     if not include_ranges:
         return h
-    pairs = ",".join(f"{r['start']}-{r['end']}" for r in sorted(include_ranges, key=lambda r: r["start"]))
+    pairs = ",".join(
+        f"{r['start']}-{r['end']}"
+        for r in sorted(include_ranges, key=lambda r: r["start"])
+    )
     return f"{h}:{pairs}"
 
 
-def score_text(
-    text: str,
-    exclude_ranges: list[dict] | None = None,
-    include_ranges: list[dict] | None = None,
-) -> list[dict]:
+def score_text(text: str) -> list[dict]:
     """
     Tokenize `text`, score each token by masked-LM confidence, return token list.
-
-    exclude_ranges: tokens overlapping any excluded range get score=None and are skipped.
-    include_ranges: if provided, ONLY tokens overlapping these ranges are scored;
-                    all other tokens are returned with score=None. This is much faster
-                    than scoring everything when callers only need a subset of positions.
     """
     if not text.strip():
         return []
 
-    key = _cache_key(text, include_ranges)
+    key = _cache_key(text)
     if key in _score_cache:
         _score_cache.move_to_end(key)
         return _score_cache[key]
@@ -96,7 +91,7 @@ def _score_chunk(
         max_length=512,
     )
 
-    input_ids = encoding["input_ids"][0]           # (seq_len,)
+    input_ids = encoding["input_ids"][0]  # (seq_len,)
     attention_mask = encoding["attention_mask"][0]  # (seq_len,)
     offset_mapping = encoding["offset_mapping"][0]  # (seq_len, 2)
 
@@ -125,15 +120,17 @@ def _score_chunk(
         if not excluded and include_ranges is not None:
             excluded = not _overlaps(tok_start_abs, tok_end_abs, include_ranges)
 
-        records.append({
-            "text": tok_text,
-            "start": tok_start_abs,
-            "end": tok_end_abs,
-            "score": None,
-            "_pos": i,
-            "_tok_id": tok_id,
-            "_excluded": excluded,
-        })
+        records.append(
+            {
+                "text": tok_text,
+                "start": tok_start_abs,
+                "end": tok_end_abs,
+                "score": None,
+                "_pos": i,
+                "_tok_id": tok_id,
+                "_excluded": excluded,
+            }
+        )
 
         if not excluded:
             scorable_positions.append(len(records) - 1)
@@ -145,7 +142,11 @@ def _score_chunk(
     base_mask = attention_mask.unsqueeze(0)
 
     scores = _batch_score(
-        model, device, base_ids, base_mask, mask_token_id,
+        model,
+        device,
+        base_ids,
+        base_mask,
+        mask_token_id,
         [records[ri]["_pos"] for ri in scorable_positions],
         [records[ri]["_tok_id"] for ri in scorable_positions],
     )
@@ -204,7 +205,4 @@ def _overlaps(start: int, end: int, ranges: list[dict]) -> bool:
 
 
 def _clean(records: list[dict]) -> list[dict]:
-    return [
-        {k: v for k, v in rec.items() if not k.startswith("_")}
-        for rec in records
-    ]
+    return [{k: v for k, v in rec.items() if not k.startswith("_")} for rec in records]

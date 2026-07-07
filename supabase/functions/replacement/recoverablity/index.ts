@@ -1,5 +1,3 @@
-import type { Lexicon } from "../lexicon/index.ts";
-
 export interface MlmToken {
   // I think the start and end is replacment cords
   text: string;
@@ -8,14 +6,6 @@ export interface MlmToken {
   score: number | null;
 }
 
-export interface ScoredLexicon extends Lexicon {
-  score: number | null;
-}
-
 export interface RecoverablityService {
-  recoverableScore(
-    text: string,
-    start: number,
-    end: number,
-  ): Promise<number | null>;
+  score(text: string): Promise<number[]>;
 }

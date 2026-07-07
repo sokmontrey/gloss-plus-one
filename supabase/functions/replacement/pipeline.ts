@@ -28,7 +28,7 @@ export async function runPipeline(
   const t1 = Date.now();
   const [translations, scoredLexicons] = await Promise.all([
     services.translation.translateLexicons(text, candidates, targetLanguage),
-    services.recoverability.scoreLexicons(text, candidates),
+    services.recoverability.score(text),
   ]);
   console.info(`[pipeline] mlm+translate: ${Date.now() - t1}ms`);
 
