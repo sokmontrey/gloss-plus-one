@@ -1,16 +1,15 @@
 import type { Lexicon } from "../lexicon/index.ts";
 import type { TranslationItem, TranslationService } from "./index.ts";
 
-const TRANSLATION_URL =
-  Deno.env.get("TRANSLATION_URL") ?? "http://localhost:8003";
-
 export class TranslationClass implements TranslationService {
+  private readonly TRANSLATION_URL =
+    Deno.env.get("TRANSLATION_URL") ?? "http://localhost:8003";
   async translateLexicons(
     text: string,
     lexicons: Lexicon[],
     targetLang: string,
   ): Promise<TranslationItem[]> {
-    const res = await fetch(`${TRANSLATION_URL}/translate`, {
+    const res = await fetch(`${this.TRANSLATION_URL}/translate`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({

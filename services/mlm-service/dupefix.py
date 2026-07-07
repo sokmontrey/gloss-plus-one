@@ -3,6 +3,16 @@ text = "we're something"
 tups = [(0, 5), (5, 6), (6, 15)]  # y
 rates = {"we": 0.8, "'re": 0.6, " ": -1, "something": 0.1}  # x
 hash = {}
+<<<<<<< Updated upstream
+=======
+"""
+score:  0.7
+units:  ['we', "'re"]
+score:  0.1
+units:  ['something']
+
+"""
+>>>>>>> Stashed changes
 
 
 # make function return in prop format
@@ -33,6 +43,10 @@ def rateUnits(range, score):
         if unit_scores:
             print("score: ", sum(unit_scores) / len(unit_scores))
             print("units: ", units)
+<<<<<<< Updated upstream
+=======
+        hash.clear()
+>>>>>>> Stashed changes
 
 
 rateUnits(tups, rates)

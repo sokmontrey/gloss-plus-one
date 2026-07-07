@@ -1,11 +1,12 @@
 import type { Lexicon, LexiconService } from "./index.ts";
 
-const LEXICON_URL = Deno.env.get("LEXICON_URL") ?? "http://localhost:8001";
-const REPLACEABLE_TYPES = new Set(["function"]); // this means that only words like "the" -> "le" will be marked for replacing
-
 export class LexiconClass implements LexiconService {
+  private readonly LEXICON_URL =
+    Deno.env.get("LEXICON_URL") ?? "http://localhost:8001";
+  private readonly REPLACEABLE_TYPES = new Set(["function"]);
+
   async getReplaceableLexicons(text: string): Promise<Lexicon[]> {
-    const res = await fetch(`${LEXICON_URL}/split`, {
+    const res = await fetch(`${this.LEXICON_URL}/split`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ text }),
@@ -17,6 +18,6 @@ export class LexiconClass implements LexiconService {
 
     const data = await res.json();
     const lexicons: Lexicon[] = data.lexicons ?? [];
-    return lexicons.filter((l) => REPLACEABLE_TYPES.has(l.type));
+    return lexicons.filter((l) => this.REPLACEABLE_TYPES.has(l.type));
   }
 }

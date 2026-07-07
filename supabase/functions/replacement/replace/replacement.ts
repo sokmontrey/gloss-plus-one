@@ -3,12 +3,11 @@ import type { TranslationItem } from "../translation/index.ts";
 import type { Replacement } from "../types.ts";
 import type { ReplacementService } from "./index.ts";
 
-const DEFAULT_SCORE_THRESHOLD = 0.85;
-
 export class ReplacementClass implements ReplacementService {
+  private readonly DEFAULT_SCORE_THRESHOLD = 0.85;
   private scoreThreshold: number;
 
-  constructor(scoreThreshold = DEFAULT_SCORE_THRESHOLD) {
+  constructor(scoreThreshold = this.DEFAULT_SCORE_THRESHOLD) {
     this.scoreThreshold = scoreThreshold;
   }
 

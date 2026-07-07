@@ -18,6 +18,4 @@ export interface RecoverablityService {
     start: number,
     end: number,
   ): Promise<number | null>;
-
-  scoreLexicons(text: string, lexicons: Lexicon[]): Promise<ScoredLexicon[]>;
 }
