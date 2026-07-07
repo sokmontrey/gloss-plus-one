@@ -1,7 +1,15 @@
 import "@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
-import { ReplacementRequestSchema, type ReplacementResponse } from "./types.ts";
+import {
+    EnvSchema,
+    ReplacementRequestSchema,
+    type ReplacementResponse,
+    type Services,
+} from "./types.ts";
 import { runPipeline } from "./pipeline.ts";
+import { DeepLTranslationService } from "./translate/deepl.ts";
+import { XmlUnitTagService } from "./unit-tag/xml.ts";
+import { MlmRecoverabilityService } from "./recoverability/mlm.ts";
 
 const CORS_HEADERS = {
     "Access-Control-Allow-Origin": "*",
@@ -9,7 +17,24 @@ const CORS_HEADERS = {
         "authorization, x-client-info, apikey, content-type",
 };
 
-Deno.serve(async (req) => {
+const envParseResult = EnvSchema.safeParse(Deno.env.toObject());
+if (!envParseResult.success) {
+    throw new Error("Invalid environment variables");
+}
+const env = envParseResult.data;
+
+const services: Services = {
+    translationService: new DeepLTranslationService(
+        env.SB_TRANSLATE_DEEPL_API_URL,
+        env.SB_TRANSLATE_DEEPL_API_KEY,
+    ),
+    unitTagService: new XmlUnitTagService(),
+    recoverabilityService: new MlmRecoverabilityService(
+        env.SB_RECOVERABILITY_MLM_URL,
+    ),
+};
+
+Deno.serve(async (req: any) => {
     if (req.method === "OPTIONS") {
         return new Response(null, { headers: CORS_HEADERS });
     }
@@ -73,6 +98,7 @@ Deno.serve(async (req) => {
             body.text,
             body.sourceLanguage,
             body.targetLanguage,
+            services,
         );
     } catch (e) {
         console.error("pipeline error:", e);

@@ -43,10 +43,9 @@ export class XmlUnitTagService implements UnitTagService {
         }
 
         return spans.map((span) => {
-            const value = found.get(span.id);
-            if (value === undefined)
-                throw new Error(`Missing tag for span id: ${span.id}`);
-            return { ...span, value };
+            const text = found.get(span.id);
+            if (text === undefined) return span;
+            return { ...span, text };
         });
     }
 }

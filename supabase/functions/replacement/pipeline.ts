@@ -1,23 +1,25 @@
-import { EnvSchema, EnvType, type Replacement } from "./types.ts";
-import { createServices } from "./servicesFactory.ts";
+import { Services, type Replacement } from "./types.ts";
+import { Spans } from "./unit-tag/index.ts";
 
 export async function runPipeline(
     text: string,
     sourceLanguage: string,
     targetLanguage: string,
+    {
+        translationService,
+        unitTagService,
+        recoverabilityService,
+    }: Services
 ): Promise<Replacement[]> {
-    const envParseResult = EnvSchema.safeParse(Deno.env.toObject());
-    if (!envParseResult.success) {
-        throw new Error("Invalid environment variables");
-    }
+    const tokens = await recoverabilityService.score(text);
 
-    const { translationService, unitTagService } = createServices(envParseResult.data);
+    // lookup user's word bank
 
-    const spans = [{ start: 4, end: 7, value: "cat" }];
-    const units = spans.map((span, index) => ({ ...span, id: index }));
+    const units = tokens
+        .filter((t) => t.score > 0.5)
+        .map((span, index) => ({ ...span, id: index }));
 
     const taggedText = unitTagService.insert(text, units);
-
     const translatedText = (await translationService.translate(
         [taggedText],
         sourceLanguage,
@@ -31,6 +33,7 @@ export async function runPipeline(
     // ...
     // Other modules and steps
     // ...
+    //
 
     return [
         {
