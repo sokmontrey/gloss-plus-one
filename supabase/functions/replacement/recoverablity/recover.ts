@@ -1,7 +1,7 @@
 import type { Lexicon } from "../lexicon/index.ts";
-import type { MlmToken, RecoverablityService } from "./index.ts";
+import type { RecoverablityService } from "./index.ts";
 
-export class RecoverClass implements RecoverablityService {
+export class MlmRecoverabilityService implements RecoverablityService {
   private readonly MLM_URL = Deno.env.get("MLM_URL") ?? "http://localhost:8002";
   async recoverableScore(
     text: string,
