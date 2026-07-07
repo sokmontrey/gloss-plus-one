@@ -1,22 +1,11 @@
 """
-Pure scoring logic — no FastAPI imports.
+Masked-LM scoring: tokenize text, mask each token, return its predicted probability.
 
-score_text(text, exclude_ranges, include_ranges) -> list of token dicts with keys:
-    text, start, end, score (float | None)
-
-Uses true masked-LM scoring: each token is masked individually, and the model
-predicts it from bidirectional context. The predicted probability of the original
-token is the recoverability score.
-
-Optimization: batches masked variants (batch_size=32) for throughput.
-include_ranges: if provided, only tokens overlapping those ranges are scored —
-the rest are returned with score=None. This is the key speedup: callers that
-only care about function words pass those positions and skip scoring everything else.
+Token dicts: text, start, end (char offsets into original text), score (float or None).
+Punctuation/whitespace tokens get score=None (no signal). Batched for throughput.
 """
 
-import hashlib
 import re
-from collections import OrderedDict
 
 import torch
 import torch.nn.functional as F
@@ -25,60 +14,23 @@ from chunker import chunk_text
 from model_loader import get_device, get_model, get_tokenizer
 
 BATCH_SIZE = 32
-_CACHE_MAX = 64
 
-# Regex that matches strings containing only punctuation / whitespace
 _PUNCT_RE = re.compile(r"^[\W_]+$")
-
-# LRU cache: (text_hash, include_key) -> scored token list
-_score_cache: OrderedDict = OrderedDict()
-
-
-def _cache_key(text: str) -> str:
-    h = hashlib.md5(text.encode()).hexdigest()[:16]
-    if not include_ranges:
-        return h
-    pairs = ",".join(
-        f"{r['start']}-{r['end']}"
-        for r in sorted(include_ranges, key=lambda r: r["start"])
-    )
-    return f"{h}:{pairs}"
 
 
 def score_text(text: str) -> list[dict]:
-    """
-    Tokenize `text`, score each token by masked-LM confidence, return token list.
-    """
     if not text.strip():
         return []
 
-    key = _cache_key(text)
-    if key in _score_cache:
-        _score_cache.move_to_end(key)
-        return _score_cache[key]
-
-    exclude = exclude_ranges or []
-
     results: list[dict] = []
     for chunk, chunk_offset in chunk_text(text):
-        chunk_results = _score_chunk(chunk, chunk_offset, exclude, include_ranges)
-        results.extend(chunk_results)
+        results.extend(_score_chunk(chunk, chunk_offset))
 
     results.sort(key=lambda t: t["start"])
-
-    _score_cache[key] = results
-    if len(_score_cache) > _CACHE_MAX:
-        _score_cache.popitem(last=False)
-
     return results
 
 
-def _score_chunk(
-    chunk: str,
-    chunk_offset: int,
-    exclude_ranges: list[dict],
-    include_ranges: list[dict] | None,
-) -> list[dict]:
+def _score_chunk(chunk: str, chunk_offset: int) -> list[dict]:
     tokenizer = get_tokenizer()
     model = get_model()
     device = get_device()
@@ -91,54 +43,37 @@ def _score_chunk(
         max_length=512,
     )
 
-    input_ids = encoding["input_ids"][0]  # (seq_len,)
-    attention_mask = encoding["attention_mask"][0]  # (seq_len,)
-    offset_mapping = encoding["offset_mapping"][0]  # (seq_len, 2)
-
+    input_ids = encoding["input_ids"][0]
+    attention_mask = encoding["attention_mask"][0]
+    offset_mapping = encoding["offset_mapping"][0]
     mask_token_id = tokenizer.mask_token_id
 
     records: list[dict] = []
-    scorable_positions: list[int] = []
+    scorable: list[tuple[int, dict, int]] = []  # (pos, record, orig_id)
 
     for i, (tok_id, (tok_start_rel, tok_end_rel)) in enumerate(
         zip(input_ids.tolist(), offset_mapping.tolist())
     ):
-        # Skip special tokens ([CLS], [SEP], [PAD])
+        # ponytail: skip special tokens via (0,0) offset sentinel; reliable for BERT-family
         if tok_start_rel == 0 and tok_end_rel == 0:
             continue
 
-        tok_start_abs = chunk_offset + tok_start_rel
-        tok_end_abs = chunk_offset + tok_end_rel
         tok_text = chunk[tok_start_rel:tok_end_rel]
+        rec = {
+            "text": tok_text,
+            "start": chunk_offset + tok_start_rel,
+            "end": chunk_offset + tok_end_rel,
+            "score": None,
+        }
+        records.append(rec)
 
-        if _PUNCT_RE.match(tok_text):
-            continue
+        if not _PUNCT_RE.match(tok_text):
+            scorable.append((i, rec, tok_id))
 
-        # A token is excluded if it's in exclude_ranges, or if include_ranges is set
-        # and the token doesn't overlap any included range.
-        excluded = _overlaps(tok_start_abs, tok_end_abs, exclude_ranges)
-        if not excluded and include_ranges is not None:
-            excluded = not _overlaps(tok_start_abs, tok_end_abs, include_ranges)
+    if not scorable:
+        return records
 
-        records.append(
-            {
-                "text": tok_text,
-                "start": tok_start_abs,
-                "end": tok_end_abs,
-                "score": None,
-                "_pos": i,
-                "_tok_id": tok_id,
-                "_excluded": excluded,
-            }
-        )
-
-        if not excluded:
-            scorable_positions.append(len(records) - 1)
-
-    if not scorable_positions:
-        return _clean(records)
-
-    base_ids = input_ids.unsqueeze(0)  # (1, seq_len)
+    base_ids = input_ids.unsqueeze(0)
     base_mask = attention_mask.unsqueeze(0)
 
     scores = _batch_score(
@@ -147,14 +82,14 @@ def _score_chunk(
         base_ids,
         base_mask,
         mask_token_id,
-        [records[ri]["_pos"] for ri in scorable_positions],
-        [records[ri]["_tok_id"] for ri in scorable_positions],
+        [p for p, _, _ in scorable],
+        [oid for _, _, oid in scorable],
     )
 
-    for ri, score in zip(scorable_positions, scores):
-        records[ri]["score"] = score
+    for (_, rec, _), score in zip(scorable, scores):
+        rec["score"] = score
 
-    return _clean(records)
+    return records
 
 
 def _batch_score(
@@ -186,23 +121,11 @@ def _batch_score(
             logits = model(
                 input_ids=batch_ids,
                 attention_mask=batch_mask_tensor,
-            ).logits  # (batch_size, seq_len, vocab_size)
+            ).logits
 
         probs = F.softmax(logits, dim=-1)
 
         for k, (pos, orig_id) in enumerate(zip(batch_positions, batch_orig_ids)):
-            p = probs[k, pos, orig_id].item()
-            scores.append(round(p, 6))
+            scores.append(round(probs[k, pos, orig_id].item(), 6))
 
     return scores
-
-
-def _overlaps(start: int, end: int, ranges: list[dict]) -> bool:
-    for r in ranges:
-        if start < r["end"] and end > r["start"]:
-            return True
-    return False
-
-
-def _clean(records: list[dict]) -> list[dict]:
-    return [{k: v for k, v in rec.items() if not k.startswith("_")} for rec in records]

@@ -32,13 +32,8 @@ class TokenScore(BaseModel):
 
 class ScoreResponse(BaseModel):
     tokens: list[TokenScore]
-    model: str
 
 
 @app.post("/recoverable_score", response_model=ScoreResponse)
 async def recoverable_score(req: ScoreRequest):
-    tokens = score_text(req.text)
-    return ScoreResponse(
-        tokens=[TokenScore(**t) for t in tokens],
-        model=MODEL_NAME,
-    )
+    return ScoreResponse(tokens=[TokenScore(**t) for t in score_text(req.text)])
