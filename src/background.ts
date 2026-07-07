@@ -1,4 +1,5 @@
 import type { ExtractionBatch, ExtractionResult, PipelineResponse, TextBlock, InlineEdit } from '@/extraction'
+import { GOOGLE_SIGN_IN_MESSAGE, completeOAuthRedirect, requestGoogleOAuthUrl } from '@/lib/auth'
 import { getSupabase } from '@/lib/supabase'
 
 const EXTRACTION_RESULT_MESSAGE = 'gloss-plus-one:extraction-result'
@@ -37,8 +38,40 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return false
   }
 
+  if (message.type === GOOGLE_SIGN_IN_MESSAGE) {
+    void handleGoogleSignIn().then(sendResponse)
+    return true
+  }
+
   return undefined
 })
+
+// ── Google sign-in ─────────────────────────────────────────────────────────────
+// Run from the service worker: `launchWebAuthFlow` here opens a fresh window,
+// leaving the popup alive. The popup's own JS context is destroyed by Chrome
+// when OAuth replaces it, so running this from the popup loses the session
+// write that `exchangeCodeForSession` does at the end of the flow.
+
+async function handleGoogleSignIn(): Promise<{ ok: true } | { ok: false; error: string }> {
+  const supabase = getSupabase()
+  if (!supabase) return { ok: false, error: 'Supabase client is not configured' }
+
+  try {
+    const authUrl = await requestGoogleOAuthUrl(supabase, chrome.identity.getRedirectURL())
+    console.debug('[auth] OAuth URL:', authUrl)
+
+    const responseUrl = await chrome.identity.launchWebAuthFlow({ url: authUrl, interactive: true })
+    if (!responseUrl) throw new Error('Sign-in was cancelled')
+    console.debug('[auth] redirect URL:', responseUrl)
+
+    await completeOAuthRedirect(supabase, responseUrl)
+    return { ok: true }
+  } catch (e) {
+    const error = e instanceof Error ? e.message : 'Sign-in failed'
+    console.warn('[gloss+1] sign-in failed:', error)
+    return { ok: false, error }
+  }
+}
 
 // ── Batch handler ──────────────────────────────────────────────────────────────
 

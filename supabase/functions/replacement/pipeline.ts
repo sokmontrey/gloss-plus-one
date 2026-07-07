@@ -1,45 +1,47 @@
-import type { Replacement } from "./types.ts";
-import type { LexiconService } from "./lexicon/index.ts";
-import type { TranslationService } from "./translation/index.ts";
-import type { RecoverablityService } from "./recoverablity/index.ts";
-import type { ReplacementService } from "./replace/index.ts";
+import { Services, type Replacement } from "./types.ts";
+import { Spans } from "./unit-tag/index.ts";
 
 export async function runPipeline(
-  text: string,
-  targetLanguage: string,
-  services: {
-    lexicon: LexiconService;
-    translation: TranslationService;
-    recoverability: RecoverablityService;
-    replacement: ReplacementService;
-  },
+    text: string,
+    sourceLanguage: string,
+    targetLanguage: string,
+    {
+        translationService,
+        unitTagService,
+        recoverabilityService,
+    }: Services
 ): Promise<Replacement[]> {
-  // const t0 = Date.now();
+    const tokens = await recoverabilityService.score(text);
 
-  // // Step 1: get candidate lexicons
-  // const candidates = await services.lexicon.getReplaceableLexicons(text);
-  // console.info(
-  //   `[pipeline] lexicons: ${Date.now() - t0}ms (${candidates.length} candidates)`,
-  // );
+    // lookup user's word bank
 
-  // if (candidates.length === 0) return [];
+    const units = tokens
+        .filter((t) => t.score > 0.5)
+        .map((span, index) => ({ ...span, id: index }));
 
-  // // Step 2: MLM (only function word positions) + translation in parallel.
-  // const t1 = Date.now();
-  // const [translations, scoredLexicons] = await Promise.all([
-  //   services.translation.translateLexicons(text, candidates, targetLanguage),
-  //   services.recoverability.score(text),
-  // ]);
-  // console.info(`[pipeline] mlm+translate: ${Date.now() - t1}ms`);
+    const taggedText = unitTagService.insert(text, units);
+    const translatedText = (await translationService.translate(
+        [taggedText],
+        sourceLanguage,
+        targetLanguage,
+    ))[0];
 
-  // // Step 3: filter and build replacements
-  // const replacements = services.replacement.buildReplacements(
-  //   scoredLexicons,
-  //   translations,
-  // );
+    const extractedSpans = unitTagService.extract(translatedText, units);
 
-  // console.info(
-  //   `[pipeline] total: ${Date.now() - t0}ms → ${replacements.length} replacements`,
-  // );
-  return replacements;
+    console.log(extractedSpans);
+
+    // ...
+    // Other modules and steps
+    // ...
+    //
+
+    return [
+        {
+            start: 0,
+            end: translatedText[0].length,
+            original: text,
+            replacement: translatedText[0],
+            score: undefined,
+        },
+    ];
 }

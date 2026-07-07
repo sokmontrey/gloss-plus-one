@@ -1,94 +1,126 @@
 import "@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
-import { ReplacementRequestSchema, type ReplacementResponse } from "./types.ts";
+import {
+    EnvSchema,
+    ReplacementRequestSchema,
+    type ReplacementResponse,
+    type Services,
+} from "./types.ts";
 import { runPipeline } from "./pipeline.ts";
-import { LexiconClass } from "./lexicon/lexicon.ts";
-import { TranslationClass } from "./translation/translation.ts";
-import { RecoverClass } from "./recoverablity/recover.ts";
-import { ReplacementClass } from "./replace/replacement.ts";
+import { DeepLTranslationService } from "./translate/deepl.ts";
+import { XmlUnitTagService } from "./unit-tag/xml.ts";
+import { MlmRecoverabilityService } from "./recoverability/mlm.ts";
 
 const CORS_HEADERS = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Headers":
+        "authorization, x-client-info, apikey, content-type",
 };
 
-// Instantiate services once per container load
-const lexiconService = new LexiconClass();
-const translationService = new TranslationClass();
-const recoverabilityService = new RecoverClass();
-const replacementService = new ReplacementClass();
+const envParseResult = EnvSchema.safeParse(Deno.env.toObject());
+if (!envParseResult.success) {
+    throw new Error("Invalid environment variables");
+}
+const env = envParseResult.data;
 
-Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") {
-    return new Response(null, { headers: CORS_HEADERS });
-  }
+const services: Services = {
+    translationService: new DeepLTranslationService(
+        env.SB_TRANSLATE_DEEPL_API_URL,
+        env.SB_TRANSLATE_DEEPL_API_KEY,
+    ),
+    unitTagService: new XmlUnitTagService(),
+    recoverabilityService: new MlmRecoverabilityService(
+        env.SB_RECOVERABILITY_MLM_URL,
+    ),
+};
 
-  const authHeader = req.headers.get("Authorization");
-  if (!authHeader) {
-    return new Response(JSON.stringify({ error: "missing authorization" }), {
-      status: 401,
-      headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
-    });
-  }
+Deno.serve(async (req: any) => {
+    if (req.method === "OPTIONS") {
+        return new Response(null, { headers: CORS_HEADERS });
+    }
 
-  const supabase = createClient(
-    Deno.env.get("SUPABASE_URL")!,
-    Deno.env.get("SUPABASE_ANON_KEY")!,
-    { global: { headers: { Authorization: authHeader } } },
-  );
+    const authHeader = req.headers.get("Authorization");
+    if (!authHeader) {
+        return new Response(
+            JSON.stringify({ error: "missing authorization" }),
+            {
+                status: 401,
+                headers: {
+                    ...CORS_HEADERS,
+                    "Content-Type": "application/json",
+                },
+            },
+        );
+    }
 
-  const { data: { user }, error } = await supabase.auth.getUser();
-  if (error || !user) {
-    return new Response(JSON.stringify({ error: "unauthorized" }), {
-      status: 401,
-      headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
-    });
-  }
+    const supabase = createClient(
+        Deno.env.get("SUPABASE_URL")!,
+        Deno.env.get("SUPABASE_ANON_KEY")!,
+        { global: { headers: { Authorization: authHeader } } },
+    );
 
-  let json: unknown;
-  try {
-    json = await req.json();
-  } catch (e) {
-    console.error("json parse error:", e);
-    return new Response(JSON.stringify({ error: "invalid json" }), {
-      status: 400,
-      headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
-    });
-  }
+    const {
+        data: { user },
+        error,
+    } = await supabase.auth.getUser();
+    if (error || !user) {
+        return new Response(JSON.stringify({ error: "unauthorized" }), {
+            status: 401,
+            headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
+        });
+    }
 
-  const parsed = ReplacementRequestSchema.safeParse(json);
-  if (!parsed.success) {
-    console.error("json parse error:", parsed.error);
-    return new Response(JSON.stringify({ error: parsed.error.flatten() }), {
-      status: 400,
-      headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
-    });
-  }
+    let json: unknown;
+    try {
+        json = await req.json();
+    } catch (e) {
+        console.error("json parse error:", e);
+        return new Response(JSON.stringify({ error: "invalid json" }), {
+            status: 400,
+            headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
+        });
+    }
 
-  const body = parsed.data;
+    const parsed = ReplacementRequestSchema.safeParse(json);
+    if (!parsed.success) {
+        console.error("json parse error:", parsed.error);
+        return new Response(JSON.stringify({ error: parsed.error.flatten() }), {
+            status: 400,
+            headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
+        });
+    }
 
-  let replacements: ReplacementResponse["replacements"];
-  try {
-    replacements = await runPipeline(body.text, body.targetLanguage, {
-      lexicon: lexiconService,
-      translation: translationService,
-      recoverability: recoverabilityService,
-      replacement: replacementService,
-    });
-  } catch (e) {
-    console.error("pipeline error:", e);
-    return new Response(JSON.stringify({ error: "pipeline failed", detail: String(e) }), {
-      status: 502,
-      headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
-    });
-  }
+    const body = parsed.data;
 
-  const response: ReplacementResponse = {
-    id: body.id,
-    replacements,
-  };
+    let replacements: ReplacementResponse["replacements"];
+    try {
+        replacements = await runPipeline(
+            body.text,
+            body.sourceLanguage,
+            body.targetLanguage,
+            services,
+        );
+    } catch (e) {
+        console.error("pipeline error:", e);
+        return new Response(
+            JSON.stringify({ error: "pipeline failed", detail: String(e) }),
+            {
+                status: 502,
+                headers: {
+                    ...CORS_HEADERS,
+                    "Content-Type": "application/json",
+                },
+            },
+        );
+    }
 
-  return new Response(JSON.stringify(response), {
-    headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
-  });
+    return new Response(
+        JSON.stringify({
+            id: body.id,
+            replacements,
+        }),
+        {
+            headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
+        },
+    );
 });
