@@ -47,6 +47,41 @@ function computeRetryDelayMs(attempt: number, retryAfterHeader: string | null): 
     return Math.min(exponential + jitter, MAX_RETRY_DELAY_MS);
 }
 
+// EXPERIMENTAL: item delimiters so an entire batch of independent texts can
+// be sent to (and parsed back from) Cerebras in a single request, instead
+// of one request per text.
+const ITEM_OPEN = (index: number) => `[[[ITEM ${index}]]]`;
+const ITEM_CLOSE = (index: number) => `[[[/ITEM ${index}]]]`;
+
+function buildBatchUserMessage(items: string[]): string {
+    return items
+        .map((text, index) => `${ITEM_OPEN(index)}\n${text}\n${ITEM_CLOSE(index)}`)
+        .join("\n\n");
+}
+
+function parseBatchResponse(content: string, expectedCount: number): string[] {
+    const regex = /\[\[\[ITEM (\d+)\]\]\]([\s\S]*?)\[\[\[\/ITEM \1\]\]\]/g;
+    const found = new Map<number, string>();
+
+    let match: RegExpExecArray | null;
+    while ((match = regex.exec(content)) !== null) {
+        found.set(Number(match[1]), match[2].trim());
+    }
+
+    const results: string[] = [];
+    for (let i = 0; i < expectedCount; i++) {
+        const text = found.get(i);
+        if (text === undefined) {
+            throw new Error(
+                `Cerebras batch response missing item ${i} (found ${found.size}/${expectedCount} items)`,
+            );
+        }
+        results.push(text);
+    }
+
+    return results;
+}
+
 function buildSystemPrompt(
     sourceLanguage: LanguageCode,
     targetLanguage: LanguageCode,
@@ -54,25 +89,35 @@ function buildSystemPrompt(
     const sourceName = LANGUAGE_NAMES[sourceLanguage];
     const targetName = LANGUAGE_NAMES[targetLanguage];
 
-    return `You are a translation assistant for a language-learning system that uses inline tags to mark translatable units within a sentence. Work in two explicit steps.
+    return `You are a translation assistant for a language-learning system that uses inline tags to mark translatable units within a sentence. You will be given a BATCH of independent text items in a single request; process every item and return a translation for every item.
 
 INPUT FORMAT
-Text in ${sourceName} with inline tags like <x0>word or phrase</x0>. Tags mark candidate units for independent translation; untagged text stays in ${sourceName}.
+The user message contains one or more items, each wrapped exactly like this:
+${ITEM_OPEN(0)}
+<text for the item, in ${sourceName}, with inline tags like <x0>word or phrase</x0>>
+${ITEM_CLOSE(0)}
+Items are completely independent — never let content, tag ids, or context from one item influence another item. Tags mark candidate units for independent translation; untagged text stays in ${sourceName}.
+
+For EACH item, work in two explicit steps:
 
 STEP 1: ISOLATED SPAN TRANSLATION
-For each tag, translate ONLY the text inside it, on its own, with no sentence context. Write these out as a scratch list internally: x0 → ..., x1 → ..., etc. This is your reference for what each span "should" produce alone.
+For each tag in the item, translate ONLY the text inside it, on its own, with no sentence context. Keep this as an internal scratch list (x0 → ..., x1 → ..., etc.) — this is your reference for what each span "should" produce alone.
 
-STEP 2: FULL SENTENCE TRANSLATION + RECONCILE
-Translate the entire sentence naturally into ${targetName}. Then, for each tag, check: does the isolated translation from Step 1 appear intact, in the same relative position, inside the full-sentence translation?
+STEP 2: FULL TEXT TRANSLATION + RECONCILE
+Translate the item's entire text naturally into ${targetName}. Then, for each tag, check: does the isolated translation from Step 1 appear intact, in the same relative position, inside the full translation?
 
 - If YES: apply the tag to that matching span as-is.
 - If NO, because a word from the span got absorbed, deleted, or merged into a neighboring word outside the original tag boundary (e.g. one word covers two source words, or a word from the span is missing) → EXPAND the tag to include the neighboring word(s) it depends on, so the tagged span is self-contained again.
 - If expanding would make the span too large or grammatically awkward → DROP the tag instead (leave that part untranslated).
 
-Never leave a tag whose isolated translation doesn't actually appear intact in the full sentence.
+Never leave a tag whose isolated translation doesn't actually appear intact in the full translation.
 
-OUTPUT
-Return ONLY the final tagged, translated sentence. No scratch list, no explanation, no JSON.`;
+OUTPUT FORMAT
+Return ONLY the translated items, each wrapped in the exact same markers as the input, preserving the item numbers and order exactly as given:
+${ITEM_OPEN(0)}
+<final tagged, translated text for the item>
+${ITEM_CLOSE(0)}
+No scratch list, no explanation, no JSON, and nothing outside the item markers.`;
 }
 
 export class CerebrasTranslationService implements TranslationService {
@@ -92,11 +137,16 @@ export class CerebrasTranslationService implements TranslationService {
         sourceLanguage: LanguageCode,
         targetLanguage: LanguageCode,
     ): Promise<string[]> {
-        const systemPrompt = buildSystemPrompt(sourceLanguage, targetLanguage);
+        if (sourceText.length === 0) return [];
 
-        return Promise.all(
-            sourceText.map((text) => this.translateOne(text, systemPrompt)),
-        );
+        // EXPERIMENTAL: the whole batch is folded into a single prompt and
+        // sent as one request, instead of one request per text, to test
+        // whether that still trips the provider's rate limit.
+        const systemPrompt = buildSystemPrompt(sourceLanguage, targetLanguage);
+        const userMessage = buildBatchUserMessage(sourceText);
+
+        const content = await this.translateOne(userMessage, systemPrompt);
+        return parseBatchResponse(content, sourceText.length);
     }
 
     private async translateOne(

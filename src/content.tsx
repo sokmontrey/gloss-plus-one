@@ -1,6 +1,5 @@
 import type { Session } from '@supabase/supabase-js'
 import {
-  LazyExtractor,
   extractBlockText,
   extractPageText,
   type ExtractionBatch,
@@ -31,8 +30,7 @@ let urlWatchTimer: number | null = null
 let urlObserver: MutationObserver | null = null
 let lastObservedUrl = window.location.href
 let lastManualExtractionUrl: string | null = null
-let lastLazyStartUrl: string | null = null
-let activeExtractor: LazyExtractor | null = null
+let lastWholePageExtractionUrl: string | null = null
 const blockRegistry = new Map<string, TextBlock>()
 const appliedBlockIds = new Set<string>()
 
@@ -245,14 +243,13 @@ function registerAutomaticExtractionListeners(): void {
   window.addEventListener('hashchange', () => scheduleExtraction('hashchange'))
   window.addEventListener('pageshow', () => {
     lastObservedUrl = window.location.href
-    lastLazyStartUrl = null
+    lastWholePageExtractionUrl = null
     ensureUrlWatchers()
     scheduleExtraction('pageshow')
   })
   window.addEventListener('pagehide', () => {
     clearScheduledExtraction()
     stopUrlWatchers()
-    stopLazyExtractor()
     cancelPipelineAndReset()
   })
   window.addEventListener('visibilitychange', () => {
@@ -357,8 +354,7 @@ function checkForUrlChange(reason: string): void {
   if (currentUrl === lastObservedUrl) return
 
   lastObservedUrl = currentUrl
-  lastLazyStartUrl = null
-  stopLazyExtractor()
+  lastWholePageExtractionUrl = null
   cancelPipelineAndReset()
   scheduleExtraction(`url-change-${reason}`)
 }
@@ -366,8 +362,7 @@ function checkForUrlChange(reason: string): void {
 async function runExtraction(reason: string): Promise<void> {
   const host = new URL(window.location.href).host
   if (!(await isSiteEnabled(host))) {
-    lastLazyStartUrl = null
-    stopLazyExtractor()
+    lastWholePageExtractionUrl = null
     return
   }
 
@@ -376,31 +371,28 @@ async function runExtraction(reason: string): Promise<void> {
   if (!document.body) return
 
   const currentUrl = window.location.href
-  if (activeExtractor && lastLazyStartUrl === currentUrl) {
+  if (lastWholePageExtractionUrl === currentUrl) {
     return
   }
 
-  startLazyExtraction(reason)
+  startWholePageExtraction(reason)
 }
 
-function startLazyExtraction(reason: string): void {
+// EXPERIMENTAL: extracts the entire page in one pass and forwards every
+// block as a single batch, instead of the previous viewport-driven
+// incremental (lazy) extraction. This exists to test whether sending
+// everything to the pipeline in one shot still trips the translation
+// provider's rate limit.
+function startWholePageExtraction(reason: string): void {
   if (!document.body) return
 
-  stopLazyExtractor()
-  activeExtractor = new LazyExtractor(
-    { rootMargin: '300px' },
-    (batch) => {
-      registerBlocks(batch.blocks)
-      void forwardBatchToBackground(reason, batch)
-    },
-  )
-  activeExtractor.start(document.body)
-  lastLazyStartUrl = window.location.href
-}
+  const result = extractPageText(document.body)
+  registerBlocks(result.blocks)
+  lastWholePageExtractionUrl = window.location.href
 
-function stopLazyExtractor(): void {
-  activeExtractor?.stop()
-  activeExtractor = null
+  if (result.blocks.length === 0) return
+
+  void forwardBatchToBackground(reason, toWholePageBatch(result))
 }
 
 async function handleManualExtraction(): Promise<ManualExtractionResponse> {
@@ -411,10 +403,6 @@ async function handleManualExtraction(): Promise<ManualExtractionResponse> {
 
   if (!result.ok) {
     return { ok: false, error: result.error }
-  }
-
-  if (await isSiteEnabled(new URL(window.location.href).host)) {
-    startLazyExtraction('manual-kickstart')
   }
 
   return {
@@ -454,7 +442,7 @@ async function extractCurrentPage(options: {
       lastManualExtractionUrl = currentUrl
     }
 
-    await forwardExtractionToBackground('manual-extract', result)
+    await forwardBatchToBackground('manual-extract', toWholePageBatch(result))
     return { ok: true, result }
   } catch (error) {
     console.error('[gloss+1] extraction failed:', error)
@@ -705,40 +693,20 @@ async function forwardBatchToBackground(reason: string, batch: ExtractionBatch):
   }
 }
 
-const MANUAL_BATCH_SIZE = 5
-
-async function forwardExtractionToBackground(
-  reason: string,
-  result: ExtractionResult,
-): Promise<void> {
-  console.info('[gloss+1] extraction result (page, raw):', { reason, result })
-
-  // Split into small batches so early blocks get replaced while later ones are still processing
-  const { blocks } = result
-  for (let i = 0; i < blocks.length; i += MANUAL_BATCH_SIZE) {
-    const chunk = blocks.slice(i, i + MANUAL_BATCH_SIZE)
-    const batchChars = chunk.reduce((sum, b) => sum + b.text.length, 0)
-
-    try {
-      await chrome.runtime.sendMessage({
-        type: EXTRACTION_BATCH_MESSAGE,
-        reason,
-        batch: {
-          batchIndex: Math.floor(i / MANUAL_BATCH_SIZE),
-          trigger: 'manual' as const,
-          blocks: chunk,
-          stats: {
-            batchBlocks: chunk.length,
-            batchChars,
-            cumulativeBlocks: Math.min(i + MANUAL_BATCH_SIZE, blocks.length),
-            cumulativeChars: 0,
-          },
-        },
-        url: window.location.href,
-      })
-    } catch (error) {
-      console.error('[gloss+1] failed to forward extraction batch to service worker:', error)
-    }
+// Wraps a full ExtractionResult into a single ExtractionBatch so the entire
+// page can be forwarded in one go via forwardBatchToBackground, rather than
+// being split into several smaller batches.
+function toWholePageBatch(result: ExtractionResult): ExtractionBatch {
+  return {
+    batchIndex: 0,
+    trigger: 'manual',
+    blocks: result.blocks,
+    stats: {
+      batchBlocks: result.blocks.length,
+      batchChars: result.stats.totalChars,
+      cumulativeBlocks: result.stats.totalBlocks,
+      cumulativeChars: result.stats.totalChars,
+    },
   }
 }
 

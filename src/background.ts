@@ -128,8 +128,11 @@ function handleExtractionResult(
 // network layer underneath is batched.
 
 const BATCH_DEBOUNCE_MS = 250
-const MAX_ITEMS_PER_REQUEST = 20
-const MAX_CONCURRENT_REQUESTS = 3
+
+// EXPERIMENTAL: every uncached block collected in a flush is sent to the
+// edge function as a single HTTP request (no chunking), so the pipeline
+// receives — and translates — the whole page in one shot. This exists to
+// test whether that still trips the translation provider's rate limit.
 
 interface PendingGroup {
   tabId: number
@@ -252,26 +255,17 @@ async function resolveBlocksBatched(
 
   if (uncached.length === 0) return results
 
-  const chunks: TextBlock[][] = []
-  for (let i = 0; i < uncached.length; i += MAX_ITEMS_PER_REQUEST) {
-    chunks.push(uncached.slice(i, i + MAX_ITEMS_PER_REQUEST))
-  }
+  console.info('[gloss+1] sending entire uncached batch in one request', {
+    blockCount: uncached.length,
+  })
 
-  for (let i = 0; i < chunks.length; i += MAX_CONCURRENT_REQUESTS) {
-    const concurrentChunks = chunks.slice(i, i + MAX_CONCURRENT_REQUESTS)
-    const settled = await Promise.allSettled(
-      concurrentChunks.map((chunk) => callReplacementEdgeFunctionBatch(chunk, targetLanguage, accessToken)),
-    )
-
-    for (const outcome of settled) {
-      if (outcome.status === 'fulfilled') {
-        for (const entry of outcome.value) {
-          results.set(entry.blockId, entry)
-        }
-      } else {
-        console.warn('[gloss+1] batched pipeline call failed:', outcome.reason)
-      }
+  try {
+    const entries = await callReplacementEdgeFunctionBatch(uncached, targetLanguage, accessToken)
+    for (const entry of entries) {
+      results.set(entry.blockId, entry)
     }
+  } catch (error) {
+    console.warn('[gloss+1] batched pipeline call failed:', error)
   }
 
   return results

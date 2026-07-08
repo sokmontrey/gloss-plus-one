@@ -18,17 +18,18 @@ export const EnvSchema = z.object({
 // ── Request ───────────────────────────────────────────────────────────────────
 
 // A single request now carries a *batch* of items so the client can group
-// several text blocks (e.g. ones extracted close together in time) into one
-// HTTP call instead of firing one call per block. `items` must be non-empty
-// and is capped to keep any single request (and its downstream translation
-// calls) bounded in size.
+// several text blocks (e.g. ones extracted close together in time — or, in
+// the current whole-page experiment, an entire page's worth of blocks) into
+// one HTTP call instead of firing one call per block. `items` must be
+// non-empty and is capped generously just to keep payloads sane, not to
+// force chunking.
 export const ReplacementItemSchema = z.object({
   id: z.string(),
   text: z.string(),
 })
 
 export const ReplacementRequestSchema = z.object({
-  items: z.array(ReplacementItemSchema).min(1).max(50),
+  items: z.array(ReplacementItemSchema).min(1).max(1000),
   sourceLanguage: LanguageCodeSchema,
   targetLanguage: LanguageCodeSchema,
 })

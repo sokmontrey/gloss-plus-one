@@ -1,29 +1,23 @@
 import { type LanguageCode, Services, type Replacement, type ReplacementItem, type ReplacementResult } from "./types.ts";
-import { accumulateUnitScores, mergeAdjacentUnits } from "./units.ts";
+import { accumulateUnitScores, mergeAdjacentUnits, type ReplacableSegment } from "./units.ts";
 
 const REPLACEMENT_THRESHOLD = 0.5;
 
-// How many items of a batch are run through the pipeline concurrently.
-// Keeping this bounded (rather than firing every item at once) reduces the
-// odds of tripping a downstream provider's rate limit, since each item ends
-// up making its own translation call.
-const PIPELINE_BATCH_CONCURRENCY = 3;
+interface PreparedText {
+    taggedText: string;
+    replacableSegments: ReplacableSegment[];
+}
 
-export async function runPipeline(
+/**
+ * Recoverability scoring + unit tagging for a single piece of text. This is
+ * local work (aside from the recoverability service call) — it doesn't talk
+ * to the translation provider, so it's safe to do per item.
+ */
+async function prepareText(
     text: string,
-    sourceLanguage: LanguageCode,
-    targetLanguage: LanguageCode,
-    {
-        translationService,
-        unitTagService,
-        recoverabilityService,
-    }: Services
-): Promise<Replacement[]> {
+    { unitTagService, recoverabilityService }: Services,
+): Promise<PreparedText> {
     const tokens = await recoverabilityService.score(text);
-
-    // lookup user's word bank
-
-    console.log("Tokens: ", tokens);
 
     const units = accumulateUnitScores(text, tokens);
     const replacableUnits = units
@@ -31,23 +25,18 @@ export async function runPipeline(
         .map((x, index) => ({ ...x, id: index }));
 
     const replacableSegments = mergeAdjacentUnits(text, replacableUnits);
-
-    console.log("Units: ", replacableUnits);
-    console.log("Segments: ", replacableSegments);
-
     const taggedText = unitTagService.insert(text, replacableSegments);
-    console.log("Tagged text: ", taggedText);
 
-    const translatedText = await translationService.translate(
-        [taggedText],
-        sourceLanguage,
-        targetLanguage,
-    ).then(([first]) => first);
-    console.log("Translated text: ", translatedText);
+    return { taggedText, replacableSegments };
+}
 
+function buildReplacements(
+    originalText: string,
+    translatedText: string,
+    replacableSegments: ReplacableSegment[],
+    unitTagService: Services["unitTagService"],
+): Replacement[] {
     const extractedSpans = unitTagService.extract(translatedText, replacableSegments);
-    console.log("Extracted spans: ", extractedSpans);
-
     const scoreById = new Map<number, number>(
         replacableSegments.map((s) => [s.id, s.score]),
     );
@@ -55,18 +44,41 @@ export async function runPipeline(
     return extractedSpans.map((span) => ({
         start: span.start,
         end: span.end,
-        original: text.slice(span.start, span.end),
+        original: originalText.slice(span.start, span.end),
         replacement: span.text,
         score: scoreById.get(span.id),
     }));
 }
 
+export async function runPipeline(
+    text: string,
+    sourceLanguage: LanguageCode,
+    targetLanguage: LanguageCode,
+    services: Services,
+): Promise<Replacement[]> {
+    const { taggedText, replacableSegments } = await prepareText(text, services);
+
+    const [translatedText] = await services.translationService.translate(
+        [taggedText],
+        sourceLanguage,
+        targetLanguage,
+    );
+
+    return buildReplacements(text, translatedText, replacableSegments, services.unitTagService);
+}
+
 /**
- * Runs `runPipeline` for every item in a batch, with bounded concurrency.
+ * Runs the whole batch through the pipeline, but — unlike calling
+ * `runPipeline` once per item — every item's tagged text is handed to the
+ * translation service together, as a single call. Scoring/tagging is still
+ * done per item (cheap, local), but that single combined call is what
+ * actually determines how many requests hit the translation provider: one
+ * per batch instead of one per item, however large the batch is.
  *
- * Each item is isolated: a failure on one item is captured as `error` on its
- * result instead of rejecting the whole batch, so a single bad/rate-limited
- * item doesn't take down every other item in the same request.
+ * Each item is still isolated on failure: if scoring/tagging blows up for
+ * one item, only that item gets an `error`. If the shared translation call
+ * itself fails (e.g. rate limited), every item that was relying on it gets
+ * the same `error`, since there's nothing to fall back to.
  */
 export async function runPipelineBatch(
     items: ReplacementItem[],
@@ -74,32 +86,75 @@ export async function runPipelineBatch(
     targetLanguage: LanguageCode,
     services: Services,
 ): Promise<ReplacementResult[]> {
-    const results: ReplacementResult[] = new Array(items.length);
+    const { translationService, unitTagService } = services;
 
-    let nextIndex = 0;
-    async function worker(): Promise<void> {
-        while (true) {
-            const i = nextIndex++;
-            if (i >= items.length) return;
-
-            const item = items[i];
+    const prepared = await Promise.all(
+        items.map(async (item) => {
             try {
-                const replacements = await runPipeline(
-                    item.text,
-                    sourceLanguage,
-                    targetLanguage,
-                    services,
-                );
-                results[i] = { id: item.id, replacements };
+                return { item, prepared: await prepareText(item.text, services), error: undefined };
             } catch (e) {
-                console.error(`pipeline error for item ${item.id}:`, e);
-                results[i] = { id: item.id, replacements: [], error: String(e) };
+                console.error(`pipeline prep error for item ${item.id}:`, e);
+                return { item, prepared: undefined, error: String(e) };
             }
+        }),
+    );
+
+    const translatable = prepared.filter(
+        (p): p is { item: ReplacementItem; prepared: PreparedText; error: undefined } =>
+            p.prepared !== undefined,
+    );
+
+    let translatedTexts: string[] = [];
+    let translationError: string | undefined;
+
+    if (translatable.length > 0) {
+        try {
+            console.log(`Translating ${translatable.length} item(s) in a single request`);
+            translatedTexts = await translationService.translate(
+                translatable.map((p) => p.prepared.taggedText),
+                sourceLanguage,
+                targetLanguage,
+            );
+        } catch (e) {
+            console.error("batched translation error:", e);
+            translationError = String(e);
         }
     }
 
-    const workerCount = Math.min(PIPELINE_BATCH_CONCURRENCY, items.length);
-    await Promise.all(Array.from({ length: workerCount }, () => worker()));
+    const resultById = new Map<string, ReplacementResult>();
 
-    return results;
+    for (const p of prepared) {
+        if (p.error !== undefined) {
+            resultById.set(p.item.id, { id: p.item.id, replacements: [], error: p.error });
+        }
+    }
+
+    translatable.forEach((p, i) => {
+        if (translationError !== undefined) {
+            resultById.set(p.item.id, { id: p.item.id, replacements: [], error: translationError });
+            return;
+        }
+
+        try {
+            const replacements = buildReplacements(
+                p.item.text,
+                translatedTexts[i],
+                p.prepared.replacableSegments,
+                unitTagService,
+            );
+            resultById.set(p.item.id, { id: p.item.id, replacements });
+        } catch (e) {
+            console.error(`pipeline extract error for item ${p.item.id}:`, e);
+            resultById.set(p.item.id, { id: p.item.id, replacements: [], error: String(e) });
+        }
+    });
+
+    return items.map(
+        (item) =>
+            resultById.get(item.id) ?? {
+                id: item.id,
+                replacements: [],
+                error: "unknown pipeline error",
+            },
+    );
 }
