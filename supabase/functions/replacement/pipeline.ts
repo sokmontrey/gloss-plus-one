@@ -1,7 +1,7 @@
 import { type LanguageCode, Services, type Replacement, type ReplacementItem, type ReplacementResult } from "./types.ts";
 import { accumulateUnitScores, mergeAdjacentUnits } from "./units.ts";
 
-const REPLACEMENT_THRESHOLD = 0.5;
+const REPLACEMENT_THRESHOLD = 0.8;
 
 // How many items of a batch are run through the pipeline concurrently.
 // Keeping this bounded (rather than firing every item at once) reduces the
@@ -23,8 +23,6 @@ export async function runPipeline(
 
     // lookup user's word bank
 
-    console.log("Tokens: ", tokens);
-
     const units = accumulateUnitScores(text, tokens);
     const replacableUnits = units
         .filter((x) => x.score > REPLACEMENT_THRESHOLD)
@@ -32,21 +30,15 @@ export async function runPipeline(
 
     const replacableSegments = mergeAdjacentUnits(text, replacableUnits);
 
-    console.log("Units: ", replacableUnits);
-    console.log("Segments: ", replacableSegments);
-
     const taggedText = unitTagService.insert(text, replacableSegments);
-    console.log("Tagged text: ", taggedText);
 
     const translatedText = await translationService.translate(
         [taggedText],
         sourceLanguage,
         targetLanguage,
     ).then(([first]) => first);
-    console.log("Translated text: ", translatedText);
 
     const extractedSpans = unitTagService.extract(translatedText, replacableSegments);
-    console.log("Extracted spans: ", extractedSpans);
 
     const scoreById = new Map<number, number>(
         replacableSegments.map((s) => [s.id, s.score]),

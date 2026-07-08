@@ -8,6 +8,7 @@ import {
 } from "./types.ts";
 import { runPipelineBatch } from "./pipeline.ts";
 import { CerebrasTranslationService } from "./translate/cerebras.ts";
+import { DeepLTranslationService } from "./translate/deepl.ts";
 import { XmlUnitTagService } from "./unit-tag/xml.ts";
 import { MlmRecoverabilityService } from "./recoverability/mlm.ts";
 
@@ -24,8 +25,12 @@ if (!envParseResult.success) {
 const env = envParseResult.data;
 
 const services: Services = {
-    translationService: new CerebrasTranslationService(
-        env.SB_TRANSLATE_CEREBRAS_API_KEY,
+    // translationService: new CerebrasTranslationService(
+    //     env.SB_TRANSLATE_CEREBRAS_API_KEY,
+    // ),
+    translationService: new DeepLTranslationService(
+        env.SB_TRANSLATE_DEEPL_API_URL,
+        env.SB_TRANSLATE_DEEPL_API_KEY,
     ),
     unitTagService: new XmlUnitTagService(),
     recoverabilityService: new MlmRecoverabilityService(
