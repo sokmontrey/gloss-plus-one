@@ -1,7 +1,7 @@
 import type { Session, SupabaseClient } from '@supabase/supabase-js'
 
 /** Default `user_profiles.target_language` (matches DB default + signup trigger). */
-export const DEFAULT_TARGET_LANGUAGE = 'fr' as const
+export const DEFAULT_TARGET_LANGUAGE = 'pt' as const
 
 export type UserProfile = {
   user_id: string

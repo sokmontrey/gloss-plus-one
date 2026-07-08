@@ -6,8 +6,8 @@ import {
     type ReplacementResponse,
     type Services,
 } from "./types.ts";
-import { runPipeline } from "./pipeline.ts";
-import { DeepLTranslationService } from "./translate/deepl.ts";
+import { runPipelineBatch } from "./pipeline.ts";
+import { CerebrasTranslationService } from "./translate/cerebras.ts";
 import { XmlUnitTagService } from "./unit-tag/xml.ts";
 import { MlmRecoverabilityService } from "./recoverability/mlm.ts";
 
@@ -24,9 +24,8 @@ if (!envParseResult.success) {
 const env = envParseResult.data;
 
 const services: Services = {
-    translationService: new DeepLTranslationService(
-        env.SB_TRANSLATE_DEEPL_API_URL,
-        env.SB_TRANSLATE_DEEPL_API_KEY,
+    translationService: new CerebrasTranslationService(
+        env.SB_TRANSLATE_CEREBRAS_API_KEY,
     ),
     unitTagService: new XmlUnitTagService(),
     recoverabilityService: new MlmRecoverabilityService(
@@ -92,10 +91,10 @@ Deno.serve(async (req: any) => {
 
     const body = parsed.data;
 
-    let replacements: ReplacementResponse["replacements"];
+    let results: ReplacementResponse["results"];
     try {
-        replacements = await runPipeline(
-            body.text,
+        results = await runPipelineBatch(
+            body.items,
             body.sourceLanguage,
             body.targetLanguage,
             services,
@@ -115,10 +114,7 @@ Deno.serve(async (req: any) => {
     }
 
     return new Response(
-        JSON.stringify({
-            id: body.id,
-            replacements,
-        }),
+        JSON.stringify({ results }),
         {
             headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
         },

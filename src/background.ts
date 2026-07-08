@@ -88,15 +88,9 @@ function handleExtractionBatch(
     blockCount: batch.blocks.length,
   })
 
-  if (batch.blocks.length === 0) return
+  if (batch.blocks.length === 0 || tabId === undefined) return
 
-  const controller = new AbortController()
-  if (tabId !== undefined) {
-    if (!tabControllers.has(tabId)) tabControllers.set(tabId, new Set())
-    tabControllers.get(tabId)!.add(controller)
-  }
-
-  void processBlocks(batch.blocks, tabId, controller)
+  enqueueGroup(tabId, batch.blocks)
 }
 
 function handleExtractionResult(
@@ -112,32 +106,66 @@ function handleExtractionResult(
     blockCount: result.blocks.length,
   })
 
-  if (result.blocks.length === 0) return
+  if (result.blocks.length === 0 || tabId === undefined) return
 
-  const controller = new AbortController()
-  if (tabId !== undefined) {
-    if (!tabControllers.has(tabId)) tabControllers.set(tabId, new Set())
-    tabControllers.get(tabId)!.add(controller)
-  }
-
-  void processBlocks(result.blocks, tabId, controller)
+  enqueueGroup(tabId, result.blocks)
 }
 
-// ── Pipeline orchestration ─────────────────────────────────────────────────────
+// ── Request batching ────────────────────────────────────────────────────────────
+//
+// Text blocks that are extracted close together in time (e.g. several small
+// extraction batches fired in quick succession while the user scrolls) are
+// coalesced into a single HTTP request to the edge function instead of each
+// one triggering its own individual call. This cuts down on the number of
+// concurrent translation calls made downstream, which is what actually trips
+// provider-side rate limits.
+//
+// Coalescing is scoped per tab: the first group to arrive for a tab starts a
+// debounce window; any further groups for that tab arriving before the
+// window elapses are folded into the same flush. Each group still gets back
+// its own PIPELINE_RESPONSE_MESSAGE (in arrival order), so the content
+// script's per-batch progress/scanning bookkeeping is unaffected — only the
+// network layer underneath is batched.
 
-async function processBlocks(
-  blocks: TextBlock[],
-  tabId: number | undefined,
-  controller: AbortController,
-): Promise<void> {
-  const { signal } = controller
-  const inputBlockCount = blocks.length
-  if (!tabId) {
-    console.warn('[gloss+1] no tab id, cannot send pipeline response')
-    return
+const BATCH_DEBOUNCE_MS = 250
+const MAX_ITEMS_PER_REQUEST = 20
+const MAX_CONCURRENT_REQUESTS = 3
+
+interface PendingGroup {
+  tabId: number
+  blocks: TextBlock[]
+  controller: AbortController
+}
+
+const tabBatchQueues = new Map<number, PendingGroup[]>()
+const tabBatchTimers = new Map<number, ReturnType<typeof setTimeout>>()
+
+function enqueueGroup(tabId: number, blocks: TextBlock[]): void {
+  const controller = new AbortController()
+  if (!tabControllers.has(tabId)) tabControllers.set(tabId, new Set())
+  tabControllers.get(tabId)!.add(controller)
+
+  const queue = tabBatchQueues.get(tabId) ?? []
+  queue.push({ tabId, blocks, controller })
+  tabBatchQueues.set(tabId, queue)
+
+  if (!tabBatchTimers.has(tabId)) {
+    const timer = setTimeout(() => {
+      tabBatchTimers.delete(tabId)
+      void flushTabQueue(tabId)
+    }, BATCH_DEBOUNCE_MS)
+    tabBatchTimers.set(tabId, timer)
   }
+}
 
-  if (signal.aborted) return
+async function flushTabQueue(tabId: number): Promise<void> {
+  const groups = tabBatchQueues.get(tabId)
+  tabBatchQueues.delete(tabId)
+  if (!groups || groups.length === 0) return
+
+  // Drop groups whose pipeline was cancelled while they were waiting to flush.
+  const liveGroups = groups.filter((g) => !g.controller.signal.aborted)
+  if (liveGroups.length === 0) return
 
   const supabase = getSupabase()
   if (!supabase) {
@@ -152,57 +180,101 @@ async function processBlocks(
   }
 
   const accessToken = session.access_token
-
-  // Load user's target language (default: fr)
   const targetLanguage = await getUserTargetLanguage(supabase, session.user.id)
 
-  // Process blocks concurrently (capped to avoid overwhelming the edge function)
-  const MAX_CONCURRENT = 3
-  const responseBlocks: PipelineResponse['blocks'] = []
+  console.info('[gloss+1] flushing batched pipeline request', {
+    tabId,
+    groupCount: liveGroups.length,
+    blockCount: liveGroups.reduce((sum, g) => sum + g.blocks.length, 0),
+  })
 
-  for (let i = 0; i < blocks.length; i += MAX_CONCURRENT) {
-    if (signal.aborted) {
-      console.info('[gloss+1] pipeline cancelled for tab', tabId)
-      return
+  const resultsByBlockId = await resolveBlocksBatched(liveGroups, targetLanguage, accessToken)
+
+  for (const group of liveGroups) {
+    tabControllers.get(group.tabId)?.delete(group.controller)
+    if (group.controller.signal.aborted) continue
+
+    const responseBlocks: PipelineResponse['blocks'] = []
+    for (const block of group.blocks) {
+      const result = resultsByBlockId.get(block.blockId)
+      if (result) responseBlocks.push(result)
     }
 
-    const chunk = blocks.slice(i, i + MAX_CONCURRENT)
-    const results = await Promise.allSettled(
-      chunk.map((block) => callReplacementEdgeFunction(block, targetLanguage, accessToken, signal)),
+    const response: PipelineResponse = {
+      schemaVersion: 1,
+      requestId: `batch-${Date.now()}`,
+      blocks: responseBlocks,
+    }
+
+    try {
+      await chrome.tabs.sendMessage(group.tabId, {
+        type: PIPELINE_RESPONSE_MESSAGE,
+        response,
+        inputBlockCount: group.blocks.length,
+      })
+    } catch (error) {
+      console.warn('[gloss+1] failed to send pipeline response to tab:', error)
+    }
+  }
+}
+
+async function resolveBlocksBatched(
+  groups: PendingGroup[],
+  targetLanguage: string,
+  accessToken: string,
+): Promise<Map<string, PipelineResponse['blocks'][0]>> {
+  const results = new Map<string, PipelineResponse['blocks'][0]>()
+  const allBlocks = groups.flatMap((g) => g.blocks)
+
+  // Cache hits are resolved locally and never touch the network.
+  const uncached: TextBlock[] = []
+  for (const block of allBlocks) {
+    const cached = await getBlockCache(block.text, targetLanguage)
+    if (cached === undefined) {
+      uncached.push(block)
+      continue
+    }
+    console.info('[gloss+1] cache hit for block', block.blockId)
+    if (cached.edits.length > 0) {
+      results.set(block.blockId, {
+        blockId: block.blockId,
+        edits: cached.edits.map((e, i) => ({
+          id: `${block.blockId}-${i}`,
+          start: e.start,
+          end: e.end,
+          original: e.original,
+          replacement: e.replacement,
+          data: { score: e.score },
+        })),
+      })
+    }
+  }
+
+  if (uncached.length === 0) return results
+
+  const chunks: TextBlock[][] = []
+  for (let i = 0; i < uncached.length; i += MAX_ITEMS_PER_REQUEST) {
+    chunks.push(uncached.slice(i, i + MAX_ITEMS_PER_REQUEST))
+  }
+
+  for (let i = 0; i < chunks.length; i += MAX_CONCURRENT_REQUESTS) {
+    const concurrentChunks = chunks.slice(i, i + MAX_CONCURRENT_REQUESTS)
+    const settled = await Promise.allSettled(
+      concurrentChunks.map((chunk) => callReplacementEdgeFunctionBatch(chunk, targetLanguage, accessToken)),
     )
 
-    for (const result of results) {
-      if (result.status === 'fulfilled' && result.value) {
-        responseBlocks.push(result.value)
-      } else if (result.status === 'rejected') {
-        if ((result.reason as { name?: string })?.name !== 'AbortError') {
-          console.warn('[gloss+1] pipeline call failed:', result.reason)
+    for (const outcome of settled) {
+      if (outcome.status === 'fulfilled') {
+        for (const entry of outcome.value) {
+          results.set(entry.blockId, entry)
         }
+      } else {
+        console.warn('[gloss+1] batched pipeline call failed:', outcome.reason)
       }
     }
   }
 
-  if (signal.aborted) return
-
-  // Remove this controller from the tab's set now that it's done
-  tabControllers.get(tabId)?.delete(controller)
-
-  // Always send response (even if empty) so content script can decrement its pending counter
-  const response: PipelineResponse = {
-    schemaVersion: 1,
-    requestId: `batch-${Date.now()}`,
-    blocks: responseBlocks,
-  }
-
-  try {
-    await chrome.tabs.sendMessage(tabId, {
-      type: PIPELINE_RESPONSE_MESSAGE,
-      response,
-      inputBlockCount,
-    })
-  } catch (error) {
-    console.warn('[gloss+1] failed to send pipeline response to tab:', error)
-  }
+  return results
 }
 
 // ── Block result cache ────────────────────────────────────────────────────────
@@ -238,57 +310,41 @@ async function setBlockCache(text: string, lang: string, cached: CachedBlock): P
 
 // ── Edge function call ─────────────────────────────────────────────────────────
 
-interface EdgeFunctionResponse {
-  id: string
-  replacements: Array<{
-    start: number
-    end: number
-    original: string
-    replacement: string
-    score?: number
+interface EdgeFunctionBatchResponse {
+  results: Array<{
+    id: string
+    replacements: Array<{
+      start: number
+      end: number
+      original: string
+      replacement: string
+      score?: number
+    }>
+    error?: string
   }>
 }
 
-async function callReplacementEdgeFunction(
-  block: TextBlock,
+async function callReplacementEdgeFunctionBatch(
+  blocks: TextBlock[],
   targetLanguage: string,
   accessToken: string,
-  signal?: AbortSignal,
-): Promise<PipelineResponse['blocks'][0] | null> {
-  // Cache check — skip the edge function entirely on hit
-  const cached = await getBlockCache(block.text, targetLanguage)
-  if (cached !== undefined) {
-    console.info('[gloss+1] cache hit for block', block.blockId)
-    if (cached.edits.length === 0) return null
-    return {
-      blockId: block.blockId,
-      edits: cached.edits.map((e, i) => ({
-        id: `${block.blockId}-${i}`,
-        start: e.start,
-        end: e.end,
-        original: e.original,
-        replacement: e.replacement,
-        data: { score: e.score },
-      })),
-    }
-  }
+): Promise<PipelineResponse['blocks']> {
+  if (blocks.length === 0) return []
 
   const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string
-  if (!supabaseUrl) return null
+  if (!supabaseUrl) return []
 
   const url = `${supabaseUrl}/functions/v1/replacement`
 
   const res = await fetch(url, {
     method: 'POST',
-    signal,
     headers: {
       'Content-Type': 'application/json',
       'Authorization': `Bearer ${accessToken}`,
     },
     body: JSON.stringify({
-      id: block.blockId,
-      text: block.text,
-      originalLanguage: 'en',
+      items: blocks.map((block) => ({ id: block.blockId, text: block.text })),
+      sourceLanguage: 'en',
       targetLanguage,
     }),
   })
@@ -296,41 +352,52 @@ async function callReplacementEdgeFunction(
   if (!res.ok) {
     const text = await res.text().catch(() => '')
     console.warn(`[gloss+1] edge function ${res.status}:`, text)
-    return null
+    return []
   }
 
-  const data: EdgeFunctionResponse = await res.json()
+  const data: EdgeFunctionBatchResponse = await res.json()
+  const blocksById = new Map(blocks.map((b) => [b.blockId, b]))
+  const responseBlocks: PipelineResponse['blocks'] = []
 
-  // Cache the result (including empty — so we don't retry blocks with no replacements)
-  const cacheEdits = (data.replacements ?? []).map((rep) => ({
-    start: rep.start,
-    end: rep.end,
-    original: rep.original,
-    replacement: rep.replacement,
-    score: rep.score ?? 0.5,
-  }))
-  void setBlockCache(block.text, targetLanguage, { edits: cacheEdits })
+  for (const result of data.results ?? []) {
+    const block = blocksById.get(result.id)
+    if (!block) continue
 
-  if (cacheEdits.length === 0) return null
+    if (result.error) {
+      console.warn(`[gloss+1] pipeline error for block ${result.id}:`, result.error)
+      continue
+    }
 
-  const edits: InlineEdit[] = cacheEdits.map((e, i) => ({
-    id: `${block.blockId}-${i}`,
-    start: e.start,
-    end: e.end,
-    original: e.original,
-    replacement: e.replacement,
-    data: { score: e.score },
-  }))
+    // Cache the result (including empty — so we don't retry blocks with no replacements)
+    const cacheEdits = (result.replacements ?? []).map((rep) => ({
+      start: rep.start,
+      end: rep.end,
+      original: rep.original,
+      replacement: rep.replacement,
+      score: rep.score ?? 0.5,
+    }))
+    void setBlockCache(block.text, targetLanguage, { edits: cacheEdits })
 
-  return {
-    blockId: block.blockId,
-    edits,
+    if (cacheEdits.length === 0) continue
+
+    const edits: InlineEdit[] = cacheEdits.map((e, i) => ({
+      id: `${block.blockId}-${i}`,
+      start: e.start,
+      end: e.end,
+      original: e.original,
+      replacement: e.replacement,
+      data: { score: e.score },
+    }))
+
+    responseBlocks.push({ blockId: block.blockId, edits })
   }
+
+  return responseBlocks
 }
 
 // ── User profile helper ────────────────────────────────────────────────────────
 
-const DEFAULT_TARGET_LANGUAGE = 'fr'
+const DEFAULT_TARGET_LANGUAGE = 'pt'
 
 async function getUserTargetLanguage(
   supabase: ReturnType<typeof getSupabase>,

@@ -1,8 +1,19 @@
-import { Spans, UnitTagService } from "./index.ts";
+import type { Spans, UnitTagService } from "./index.ts";
+
+function assertUniqueIds(spans: Spans[]): void {
+    const seen = new Set<number>();
+    for (const span of spans) {
+        if (seen.has(span.id)) {
+            throw new Error(`unit-tag: duplicate span id ${span.id}`);
+        }
+        seen.add(span.id);
+    }
+}
 
 export class XmlUnitTagService implements UnitTagService {
     insert(text: string, spans: Spans[]): string {
         const sorted = spans.toSorted((a, b) => a.start - b.start);
+        assertUniqueIds(sorted);
 
         const esc = (s: string) =>
             s
@@ -13,6 +24,11 @@ export class XmlUnitTagService implements UnitTagService {
         const parts: string[] = [];
         let cursor = 0;
         for (const span of sorted) {
+            if (span.start < cursor) {
+                throw new Error(
+                    `unit-tag: overlapping span id ${span.id} starts at ${span.start}, before previous span ended at ${cursor}`,
+                );
+            }
             parts.push(esc(text.slice(cursor, span.start)));
             parts.push(
                 `<x${span.id}>${esc(text.slice(span.start, span.end))}</x${span.id}>`,
@@ -29,6 +45,8 @@ export class XmlUnitTagService implements UnitTagService {
                 .replace(/&lt;/g, "<")
                 .replace(/&gt;/g, ">")
                 .replace(/&amp;/g, "&");
+
+        assertUniqueIds(spans);
 
         // restrict matching to only known ids, avoids picking up stray/injected tags
         const idPattern = spans.map((s) => s.id).join("|");
