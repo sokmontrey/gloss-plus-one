@@ -1,7 +1,7 @@
-import type { RecoverabilityToken } from "./recoverability/index.ts";
-import type { Spans } from "./unit-tag/index.ts";
+import type { RecoverabilityToken } from "../recoverability/index.ts";
+import type { Span } from "./unit-tag.ts";
 
-export interface UnitScore extends Spans {
+export interface UnitScore extends Span {
     score: number;
 }
 
@@ -63,18 +63,18 @@ export function accumulateUnitScores(
     return units;
 }
 
-export interface ReplacableSegment extends Spans {
+export interface ReplaceableSegment extends Span {
     score: number;
 }
 
 /**
- * Merges adjacent replacable units into contiguous segments.
+ * Merges adjacent replaceable units into contiguous segments.
  *
  * Units are considered adjacent - and therefore merged into the same
  * segment - when, once sorted by `start`, the gap between them (the next
  * unit's `start` minus the current one's `end`) is at most 1. That allows
  * a single separating character (typically a space) between two units
- * while still treating them as part of the same replacable segment.
+ * while still treating them as part of the same replaceable segment.
  *
  * A segment's `score` is the average of the scores of the units merged
  * into it, and its `text`/`end` span the full range of the original text
@@ -83,7 +83,7 @@ export interface ReplacableSegment extends Spans {
 export function mergeAdjacentUnits(
     text: string,
     units: UnitScore[],
-): ReplacableSegment[] {
+): ReplaceableSegment[] {
     const sorted = units.toSorted((a, b) => a.start - b.start);
 
     interface Building {

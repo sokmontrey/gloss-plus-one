@@ -1,5 +1,5 @@
-import { LanguageCode } from "../types.ts";
-import { TranslationService } from "./index.ts";
+import type { LanguageCode } from "../types.ts";
+import type { TranslationService } from "./index.ts";
 
 interface DeepLTranslatedUnit {
     text: string;
@@ -48,8 +48,8 @@ export class DeepLTranslationService implements TranslationService {
         });
 
         if (!response.ok) {
-            console.log(await response.text())
-            throw new Error(`HTTP error! status: ${response.status}`);
+            const bodyText = await response.text();
+            throw new Error(`DeepL API error: ${response.status} ${bodyText}`);
         }
 
         const data = (await response.json()) as DeepLResponse;
