@@ -1,6 +1,6 @@
 import type { RecoverabilityToken, RecoverabilityService } from "./index.ts";
 
-interface MlmRespond {
+interface MlmResponse {
     tokens: RecoverabilityToken[];
     model: string;
 }
@@ -25,7 +25,7 @@ export class MlmRecoverabilityService implements RecoverabilityService {
             throw new Error("Failed to score text");
         }
 
-        const data = (await response.json()) as MlmRespond;
+        const data = (await response.json()) as MlmResponse;
         return data.tokens;
     }
 }

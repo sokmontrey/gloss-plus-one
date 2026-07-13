@@ -1,4 +1,4 @@
-import { LanguageCode } from "../types.ts";
+import type { LanguageCode } from "../types.ts";
 
 export interface TranslationService {
     translate(

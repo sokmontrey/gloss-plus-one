@@ -1,6 +1,19 @@
-import { type LanguageCode, Services, type Replacement, type ReplacementItem, type ReplacementResult } from "./types.ts";
-import { accumulateUnitScores, mergeAdjacentUnits } from "./units.ts";
+import type { LanguageCode, Replacement, ReplacementItem, ReplacementResult } from "./types.ts";
+import type { TranslationService } from "./translate/index.ts";
+import type { RecoverabilityService } from "./recoverability/index.ts";
+import { accumulateUnitScores, mergeAdjacentUnits } from "./utils/units.ts";
+import { insertUnitTags, extractUnitTags } from "./utils/unit-tag.ts";
 
+// The pipeline's dependency-injection contract: only backends that wrap
+// external I/O with swappable config belong here. unit-tag has neither (no
+// I/O, no config, one implementation), so it's called directly as a
+// function instead of being injected through this bag.
+export interface Services {
+    translationService: TranslationService,
+    recoverabilityService: RecoverabilityService,
+}
+
+// TODO: Read this from users table instead
 const REPLACEMENT_THRESHOLD = 0.8;
 
 // How many items of a batch are run through the pipeline concurrently.
@@ -13,24 +26,21 @@ export async function runPipeline(
     text: string,
     sourceLanguage: LanguageCode,
     targetLanguage: LanguageCode,
-    {
-        translationService,
-        unitTagService,
-        recoverabilityService,
-    }: Services
+    { translationService, recoverabilityService }: Services,
 ): Promise<Replacement[]> {
     const tokens = await recoverabilityService.score(text);
 
-    // lookup user's word bank
+    // TODO(word-bank): once a per-user word bank exists, filter units the
+    // user already knows out of `replaceableUnits` before merging/tagging.
 
     const units = accumulateUnitScores(text, tokens);
-    const replacableUnits = units
+    const replaceableUnits = units
         .filter((x) => x.score > REPLACEMENT_THRESHOLD)
         .map((x, index) => ({ ...x, id: index }));
 
-    const replacableSegments = mergeAdjacentUnits(text, replacableUnits);
+    const replaceableSegments = mergeAdjacentUnits(text, replaceableUnits);
 
-    const taggedText = unitTagService.insert(text, replacableSegments);
+    const taggedText = insertUnitTags(text, replaceableSegments);
 
     const translatedText = await translationService.translate(
         [taggedText],
@@ -38,10 +48,10 @@ export async function runPipeline(
         targetLanguage,
     ).then(([first]) => first);
 
-    const extractedSpans = unitTagService.extract(translatedText, replacableSegments);
+    const extractedSpans = extractUnitTags(translatedText, replaceableSegments);
 
     const scoreById = new Map<number, number>(
-        replacableSegments.map((s) => [s.id, s.score]),
+        replaceableSegments.map((s) => [s.id, s.score]),
     );
 
     return extractedSpans.map((span) => ({
